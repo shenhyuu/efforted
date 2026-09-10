@@ -49,6 +49,13 @@ class BackfillCreate(BaseModel):
     note: str | None = Field(default=None, max_length=500)
     effort_unit: str | None = Field(default=None, max_length=40)
 
+    @field_validator("day")
+    @classmethod
+    def validate_day(cls, value: date | None) -> date | None:
+        if value is not None and value > datetime.now(timezone.utc).date():
+            raise ValueError("day cannot be in the future")
+        return value
+
 
 class RecordUpdate(BaseModel):
     day: date | None = None
@@ -56,6 +63,13 @@ class RecordUpdate(BaseModel):
     energy: Energy | None = None
     content: str | None = Field(default=None, max_length=500)
     effort_unit: str | None = Field(default=None, max_length=40)
+
+    @field_validator("day")
+    @classmethod
+    def validate_day(cls, value: date | None) -> date | None:
+        if value is not None and value > datetime.now(timezone.utc).date():
+            raise ValueError("day cannot be in the future")
+        return value
 
 
 class LampCreate(BaseModel):

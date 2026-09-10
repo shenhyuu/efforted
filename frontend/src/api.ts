@@ -48,6 +48,16 @@ export interface WeaveData {
   past: { label: string; threads: WeaveThread[] }
   ember: { temperature: number }
 }
+export interface ComebackData {
+  is_comeback: boolean
+  card?: {
+    last_left_at: string
+    last_left_hint: string
+    restart_count: number
+    message: string
+  }
+  options?: Array<{ id: 'backfill' | 'fresh'; label: string }>
+}
 
 const TOKEN_KEY = 'zhihen_token'
 const QUEUE_DB = 'zhihen-offline'
@@ -181,7 +191,7 @@ export const api = {
     } while (true)
     return items
   },
-  weave: () => request<WeaveData>('/weave'),
+  weave: (days = 180) => request<WeaveData>(`/weave?days=${days}`),
   async checkin(input: { energy?: Energy; note?: string; effort_unit?: string; client_uuid: string }) {
     try {
       return await request<RecordItem>('/checkins', { method: 'POST', body: JSON.stringify(input) })
@@ -194,8 +204,10 @@ export const api = {
   },
   backfill: (input: { day?: string; day_slot?: DaySlot; energy?: Energy; note?: string; effort_unit?: string }) =>
     request<RecordItem>('/records/backfill', { method: 'POST', body: JSON.stringify(input) }),
+  updateRecord: (id: number, input: { day?: string | null; day_slot?: DaySlot | null; energy?: Energy | null; content?: string | null; effort_unit?: string | null }) =>
+    request<RecordItem>(`/records/${id}`, { method: 'PATCH', body: JSON.stringify(input) }),
   deleteRecord: (id: number) => request<void>(`/records/${id}`, { method: 'DELETE' }),
-  comeback: () => request<{ is_comeback: boolean; card?: { message: string } }>('/comeback'),
+  comeback: () => request<ComebackData>('/comeback'),
   activeTimer: () => request<TimerState | null>('/timers/active'),
   startTimer: () => request<TimerState>('/timers', { method: 'POST' }),
   pauseTimer: (id: number) => request<TimerState>(`/timers/${id}/pause`, { method: 'POST' }),

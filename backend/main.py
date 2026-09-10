@@ -61,6 +61,12 @@ def execute_due_purge(connection: sqlite3.Connection, user_id: int) -> bool:
             )
         else:
             connection.execute(f"DELETE FROM {table} WHERE user_id=?", (user_id,))
+    connection.execute(
+        """UPDATE user_settings SET low_energy_mode=0,auto_low_energy_mode=0,
+           hide_all_numbers=0,nothing_mode=0,notify_enabled=0,
+           weekly_report_opt_out=0,privacy_mode=0,updated_at=? WHERE user_id=?""",
+        (iso(), user_id),
+    )
     connection.execute("DELETE FROM purge_requests WHERE user_id=?", (user_id,))
     connection.commit()
     return True
@@ -161,7 +167,7 @@ async def lifespan(_: FastAPI):
         await task
 
 
-app = FastAPI(title="织痕 API", description="记录出现过的时刻，不评价它们。", version="1.1.0", lifespan=lifespan)
+app = FastAPI(title="织痕 API", description="记录出现过的时刻，不评价它们。", version="1.2.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware, allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
     allow_credentials=False, allow_methods=["GET", "POST", "PATCH", "DELETE"], allow_headers=["*"],
@@ -361,11 +367,16 @@ async def delete_record(record_id: int, user_id: AuthUser) -> None:
 
 
 @app.get("/api/v1/weave")
-async def weave(user_id: AuthUser) -> dict[str, object]:
+async def weave(
+    user_id: AuthUser,
+    days: Annotated[int, Query(ge=7, le=730)] = 180,
+) -> dict[str, object]:
+    cutoff = (utc_now() - timedelta(days=days - 1)).date().isoformat()
     with closing(connect()) as connection:
         rows = connection.execute(
             """SELECT substr(occurred_at,1,10) day,energy,count(*) count FROM records
-               WHERE user_id=? AND time_scope='exact' GROUP BY day,energy ORDER BY day""", (user_id,)
+               WHERE user_id=? AND time_scope='exact' AND substr(occurred_at,1,10)>=?
+               GROUP BY day,energy ORDER BY day""", (user_id, cutoff)
         ).fetchall()
         past = connection.execute(
             "SELECT energy,count(*) count FROM records WHERE user_id=? AND time_scope='past' GROUP BY energy", (user_id,)
@@ -406,10 +417,15 @@ async def comeback(user_id: AuthUser) -> dict[str, object]:
         previous = current
     if gap_days < 7:
         return {"is_comeback": False}
+    hint = rows[-1]["content"]
     return {"is_comeback": True, "card": {
-        "last_left_at": rows[-1]["occurred_at"], "last_left_hint": rows[-1]["content"],
+        "last_left_at": rows[-1]["occurred_at"],
+        "last_left_hint": f"你上一次离开前，记下的是「{hint}」。" if hint else "你上一次留下的痕迹还在这里。",
         "restart_count": restart_count + 1, "message": "你回来了。过去的痕迹还在这里。",
-    }}
+    }, "options": [
+        {"id": "backfill", "label": "补记那段时间"},
+        {"id": "fresh", "label": "直接开始新的"},
+    ]}
 
 
 @app.post("/api/v1/timers", status_code=201)
@@ -544,6 +560,7 @@ async def get_settings(user_id: AuthUser) -> dict[str, bool]:
             "SELECT created_at FROM records WHERE user_id=? ORDER BY created_at DESC LIMIT 1",
             (user_id,),
         ).fetchone()
+        user = connection.execute("SELECT created_at FROM users WHERE id=?", (user_id,)).fetchone()
     preferences = {
         key: bool(row[key])
         for key in (
@@ -553,8 +570,8 @@ async def get_settings(user_id: AuthUser) -> dict[str, bool]:
     }
     auto_active = bool(
         preferences["auto_low_energy_mode"]
-        and latest_record
-        and parse_iso(latest_record["created_at"]) <= utc_now() - timedelta(days=3)
+        and parse_iso(latest_record["created_at"] if latest_record else user["created_at"])
+        <= utc_now() - timedelta(days=3)
     )
     return {**preferences, "auto_low_energy_active": auto_active}
 
@@ -564,12 +581,12 @@ async def weekly_reflection(user_id: AuthUser) -> dict[str, object]:
     cutoff = iso(utc_now() - timedelta(days=7))
     with closing(connect()) as connection:
         settings = connection.execute(
-            "SELECT weekly_report_opt_out FROM user_settings WHERE user_id=?", (user_id,)
+            "SELECT weekly_report_opt_out,nothing_mode FROM user_settings WHERE user_id=?", (user_id,)
         ).fetchone()
-        if settings["weekly_report_opt_out"]:
+        if settings["weekly_report_opt_out"] or settings["nothing_mode"]:
             raise friendly(409, "REFLECTION_DISABLED", "回看已经按你的选择保持安静。")
         rows = connection.execute(
-            """SELECT occurred_at,day_slot,content FROM records
+            """SELECT occurred_at,day_slot,content,effort_unit FROM records
                WHERE user_id=? AND COALESCE(occurred_at,created_at)>=?""",
             (user_id, cutoff),
         ).fetchall()
@@ -590,6 +607,12 @@ async def weekly_reflection(user_id: AuthUser) -> dict[str, object]:
     note_count = sum(bool(row["content"]) for row in rows)
     if note_count:
         lines.append(f"有 {note_count} 根线带着当时留下的话。")
+    unit_counts: dict[str, int] = {}
+    for row in rows:
+        if row["effort_unit"]:
+            unit_counts[row["effort_unit"]] = unit_counts.get(row["effort_unit"], 0) + 1
+    for unit, count in sorted(unit_counts.items(), key=lambda item: (-item[1], item[0]))[:3]:
+        lines.append(f"“{unit}”被记下了 {count} 次。")
     return {"period": "past_7_days", "lines": lines}
 
 
@@ -643,6 +666,10 @@ async def export_data(payload: ExportInput, user_id: AuthUser) -> Response:
             "exported_at": iso(),
             "records": [dict(row) for row in connection.execute("SELECT * FROM records WHERE user_id=?", (user_id,))],
             "timers": [dict(row) for row in connection.execute("SELECT * FROM timers WHERE user_id=?", (user_id,))],
+            "timer_segments": [dict(row) for row in connection.execute(
+                "SELECT s.* FROM timer_segments s JOIN timers t ON t.id=s.timer_id WHERE t.user_id=?",
+                (user_id,),
+            )],
             "lamps": [dict(row) for row in connection.execute("SELECT * FROM lamps WHERE user_id=?", (user_id,))],
             "settings": dict(connection.execute("SELECT * FROM user_settings WHERE user_id=?", (user_id,)).fetchone()),
         }
@@ -656,7 +683,7 @@ async def export_data(payload: ExportInput, user_id: AuthUser) -> Response:
 async def ash_data(user_id: AuthUser) -> dict[str, str]:
     with closing(connect()) as connection:
         connection.execute(
-            "UPDATE records SET content=NULL,energy=NULL,effort_unit=NULL,ash=1 WHERE user_id=?",
+            "UPDATE records SET content=NULL,effort_unit=NULL,ash=1 WHERE user_id=?",
             (user_id,),
         )
         connection.execute("DELETE FROM lamps WHERE user_id=?", (user_id,))

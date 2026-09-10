@@ -1,21 +1,24 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { api, type Energy, type RecordItem } from '@/api'
+import { useRouter } from 'vue-router'
+import { api, type ComebackData, type Energy, type RecordItem } from '@/api'
 import type { WeaveData } from '@/api'
 import WeaveCanvas from '@/components/WeaveCanvas.vue'
 import EffortUnitPicker from '@/components/EffortUnitPicker.vue'
+import ComebackCard from '@/components/ComebackCard.vue'
 import { useSpeechNote } from '@/composables/useSpeechNote'
 import { useRecordsStore } from '@/stores/records'
 import { useSettingsStore } from '@/stores/settings'
 
 const store = useRecordsStore()
 const settings = useSettingsStore()
+const router = useRouter()
 const energy = ref<Energy | undefined>()
 const note = ref('')
 const effortUnit = ref<string | undefined>()
 const noteOpen = ref(false)
 const settled = ref(false)
-const comebackMessage = ref('')
+const comeback = ref<ComebackData>({ is_comeback: false })
 const echoMessage = ref('')
 const speech = useSpeechNote(note)
 const weave = ref<WeaveData | null>(null)
@@ -58,6 +61,15 @@ function recordText(record: RecordItem) {
   return [record.effort_unit, record.content].filter(Boolean).join(' · ') || '在这里'
 }
 
+function chooseComeback(choice: 'backfill' | 'fresh') {
+  if (choice === 'backfill') void router.push('/backfill')
+  else comeback.value = { is_comeback: false }
+}
+
+function openDay(day: string | null) {
+  void router.push(day ? { path: '/timeline', query: { day } } : '/timeline')
+}
+
 async function leaveTrace() {
   if (store.saving) return
   const result = await store.checkin({
@@ -81,8 +93,7 @@ onMounted(async () => {
   await store.load()
   weave.value = await api.weave().catch(() => null)
   if (!settings.values.nothing_mode) {
-    const result: { is_comeback: boolean; card?: { message: string } } = await api.comeback().catch(() => ({ is_comeback: false }))
-    if (result.is_comeback) comebackMessage.value = result.card?.message || '你回来了。'
+    comeback.value = await api.comeback().catch(() => ({ is_comeback: false }))
   }
   const delivered = await api.echo().catch(() => ({ echo: null }))
   if (delivered.echo) {
@@ -105,9 +116,9 @@ onMounted(async () => {
         <span class="eyebrow">{{ settings.lowEnergyActive ? '现在' : '此刻' }}</span>
         <h1 id="presence-title">{{ settings.lowEnergyActive ? '你还在。' : '你在这里。' }}</h1>
         <p v-if="!settings.lowEnergyActive">不用解释，也不用留下些什么。点一下就够了。</p>
-        <p v-if="comebackMessage" class="comeback-message">{{ comebackMessage }}</p>
         <p v-if="echoMessage" class="comeback-message">{{ echoMessage }}</p>
       </div>
+      <ComebackCard :comeback="comeback" @choose="chooseComeback" />
       <div v-if="!settings.lowEnergyActive" class="energy-block">
         <p>现在的电量 <span>可以不选</span></p>
         <div class="energy-picker" role="group" aria-label="选择现在的电量">
@@ -156,7 +167,7 @@ onMounted(async () => {
         <div class="empty-lines" aria-hidden="true"><i></i><i></i><i></i></div>
         <p>这里还很空，也很好。</p><span>留白也是生命的一部分。</span>
       </div>
-      <WeaveCanvas v-if="weave" :weave="weave" :animate-key="weaveAnimation" />
+      <WeaveCanvas v-if="weave" :weave="weave" :animate-key="weaveAnimation" @select-day="openDay" />
       <ol v-if="store.hasRecords" class="thread-list compact-thread-list">
         <li v-for="(record, index) in visibleRecords" :key="record.id"
           :class="['thread-row', `thread-${record.energy || 'plain'}`, { fresh: store.lastAddedId === record.id }]"
@@ -167,6 +178,7 @@ onMounted(async () => {
           <span v-if="energyLabel(record.energy)" class="record-energy">{{ energyLabel(record.energy) }}</span>
         </li>
       </ol>
+      <RouterLink v-if="store.hasRecords" class="timeline-link" to="/timeline">展开全部痕迹</RouterLink>
       <footer v-if="store.hasRecords" class="weave-footer">痕迹会慢慢变多，也可以停在这里。</footer>
     </section>
   </main>

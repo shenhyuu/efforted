@@ -10,12 +10,20 @@ async function create() {
   catch (reason) { note.value = reason instanceof Error ? reason.message : '这盏灯暂时没有被收好。' }
 }
 async function open(lamp: Lamp) { try { opened.value = await api.openLamp(lamp.id) } catch (reason) { note.value = reason instanceof Error ? reason.message : '这盏灯暂时没有回应。' } }
+async function remove(lamp: Lamp) {
+  if (!window.confirm('这盏灯会被立即物理删除。确认继续吗？')) return
+  try { await api.deleteLamp(lamp.id); lamps.value = lamps.value.filter((item) => item.id !== lamp.id); opened.value = null; note.value = '这盏灯已经移走。' }
+  catch (reason) { note.value = reason instanceof Error ? reason.message : '这盏灯暂时没有回应。' }
+}
 onMounted(load)
 </script>
 
 <template><main class="single-page"><section class="lamp-card">
   <span class="eyebrow">留一盏灯</span><h1>写给未来的自己。</h1><p class="lead">它不会主动出现，只在你来到这里时被打开。</p>
-  <div v-if="opened" class="opened-lamp"><span>那时留下的话</span><blockquote>{{ opened.message }}</blockquote><button class="text-button" type="button" @click="opened = null">轻轻合上</button></div>
+  <div v-if="opened" class="opened-lamp"><span>那时留下的话</span><blockquote>{{ opened.message }}</blockquote>
+    <p class="lamp-context">{{ opened.energy_at_write ? '写下它的时候，你也记录了自己的电量。它一直在。' : '写下它的时候，这句话被留在了这里。' }}</p>
+    <div><button class="text-button" type="button" @click="opened = null">轻轻合上</button><button class="delete-action" type="button" @click="remove(opened)">移走这盏灯</button></div>
+  </div>
   <template v-else><form class="lamp-form" @submit.prevent="create"><label>想留下的话<textarea v-model="message" maxlength="1000" rows="3" required></textarea></label>
     <div class="choice-row"><button v-for="item in [{v:'low',l:'低'},{v:'mid',l:'中'},{v:'enough',l:'够用'}]" :key="item.v" type="button" :class="{ selected: energy === item.v }" @click="energy = item.v as Energy">{{ item.l }}</button></div>
     <button class="primary-action" type="submit">留在这里</button></form>

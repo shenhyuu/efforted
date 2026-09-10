@@ -78,3 +78,29 @@ test('P1: a named effort can be kept and weekly reflection stays user-initiated'
   await page.getByRole('button', { name: '整理过去七天' }).click()
   await expect(page.getByText('过去七天，织痕里新增了', { exact: false })).toBeVisible()
 })
+
+test('1.2: traces can be opened, edited, and physically removed', async ({ page }) => {
+  const marker = `可整理的痕迹-${Date.now()}`
+  await page.goto('/backfill')
+  await page.getByLabel('想留的话 可以留空').fill(marker)
+  await page.getByRole('button', { name: '把它放进织痕' }).click()
+  await expect(page).toHaveURL('/')
+
+  await page.goto('/timeline')
+  const row = page.getByRole('listitem').filter({ hasText: marker })
+  await row.getByRole('button', { name: '整理' }).click()
+  await page.getByLabel('留下的话 可以留空').fill(`${marker}-改过`)
+  await page.getByRole('button', { name: '收好改动' }).click()
+  await expect(page.getByText(`${marker}-改过`)).toBeVisible()
+
+  page.once('dialog', (dialog) => dialog.accept())
+  await page.getByRole('listitem').filter({ hasText: `${marker}-改过` }).getByRole('button', { name: '整理' }).click()
+  await page.getByRole('button', { name: '移走这段痕迹' }).click()
+  await expect(page.getByText(`${marker}-改过`)).toHaveCount(0)
+})
+
+test('1.2: every secondary page keeps a one-action quiet check-in', async ({ page }) => {
+  await page.goto('/timer')
+  await page.getByRole('button', { name: '留下一根线' }).click()
+  await expect(page.getByText('这一刻已经收好了。')).toBeVisible()
+})

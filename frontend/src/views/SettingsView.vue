@@ -73,8 +73,12 @@ async function exportPng() {
     <button type="button" @click="toggle('hide_all_numbers')"><span><strong>隐藏数字</strong><small>不显示计时与日期数字</small></span><i :class="{ on: settings.values.hide_all_numbers }"></i></button>
     <button type="button" @click="toggle('nothing_mode')"><span><strong>什么都不做模式</strong><small>不出现回顾与提示</small></span><i :class="{ on: settings.values.nothing_mode }"></i></button>
     <button type="button" @click="toggle('weekly_report_opt_out')"><span><strong>不被总结</strong><small>回看页面不生成七天整理</small></span><i :class="{ on: settings.values.weekly_report_opt_out }"></i></button>
+    <button type="button" @click="toggle('privacy_mode')"><span><strong>共用设备保护</strong><small>系统通知只保留中性的标题与文字</small></span><i :class="{ on: settings.values.privacy_mode }"></i></button>
     <button type="button" @click="toggleEcho"><span><strong>一条回声</strong><small>久未留下新痕迹时最多送回一条存在确认，默认关闭</small></span><i :class="{ on: settings.values.notify_enabled }"></i></button>
   </div>
+  <div class="appearance-setting"><h2>界面明暗</h2><div class="choice-row" role="group" aria-label="界面明暗">
+    <button v-for="item in [{v:'system',l:'跟随设备'},{v:'light',l:'浅色'},{v:'dark',l:'深色'}]" :key="item.v" type="button" :class="{ selected: settings.appearance === item.v }" @click="settings.setAppearance(item.v as 'system' | 'light' | 'dark')">{{ item.l }}</button>
+  </div></div>
   <div class="data-actions"><h2>带走或放下</h2><div><button type="button" @click="api.exportJson">导出 JSON</button><button type="button" @click="exportPng">导出织痕长卷</button><button type="button" @click="makeAsh">灰烬模式</button></div>
     <div v-if="purge.pending" class="purge-pending"><p>清空将在 {{ purge.grace_until ? new Date(purge.grace_until).toLocaleString('zh-CN') : '' }} 后执行。</p><button type="button" @click="cancelPurge">撤销清空</button></div>
     <button v-else class="purge-button" type="button" @click="requestPurge">清空全部数据</button>

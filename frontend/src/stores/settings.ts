@@ -2,6 +2,8 @@ import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { api, type Settings, type SettingsUpdate } from '@/api'
 
+export type Appearance = 'system' | 'light' | 'dark'
+
 const defaults: Settings = {
   low_energy_mode: false, auto_low_energy_mode: false, auto_low_energy_active: false,
   hide_all_numbers: false, nothing_mode: false, notify_enabled: false,
@@ -9,6 +11,7 @@ const defaults: Settings = {
 }
 export const useSettingsStore = defineStore('settings', () => {
   const values = ref<Settings>({ ...defaults })
+  const appearance = ref<Appearance>((localStorage.getItem('zhihen_appearance') as Appearance | null) || 'system')
   const automaticSimplificationDismissed = ref(false)
   const lowEnergyActive = computed(
     () => values.value.low_energy_mode
@@ -40,5 +43,11 @@ export const useSettingsStore = defineStore('settings', () => {
     values.value.auto_low_energy_active = false
     automaticSimplificationDismissed.value = false
   }
-  return { values, lowEnergyActive, error, load, update, showFullInterface, acknowledgeActivity }
+  function setAppearance(value: Appearance) {
+    appearance.value = value
+    localStorage.setItem('zhihen_appearance', value)
+    document.documentElement.dataset.theme = value
+  }
+  setAppearance(appearance.value)
+  return { values, appearance, lowEnergyActive, error, load, update, showFullInterface, acknowledgeActivity, setAppearance }
 })

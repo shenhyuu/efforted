@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { onMounted, watch } from 'vue'
+import { onBeforeUnmount, onMounted, watch } from 'vue'
 import { RouterLink, RouterView, useRouter } from 'vue-router'
 import AuthView from '@/views/AuthView.vue'
+import QuietCheckin from '@/components/QuietCheckin.vue'
 import { useSessionStore } from '@/stores/session'
 import { useSettingsStore } from '@/stores/settings'
 
 const navigation = [
   { to: '/', label: '织痕', short: '今日', icon: '∿' },
+  { to: '/timeline', label: '痕迹', short: '痕迹', icon: '≀' },
   { to: '/backfill', label: '补记', short: '补记', icon: '↶' },
   { to: '/timer', label: '计时', short: '计时', icon: '◷' },
   { to: '/lamps', label: '一盏灯', short: '留灯', icon: '◇' },
@@ -22,6 +24,7 @@ onMounted(async () => {
   await session.bootstrap()
   if (session.authenticated) await settings.load()
 })
+onBeforeUnmount(() => window.removeEventListener('zhihen-auth-expired', session.expire))
 watch(() => session.authenticated, async (value) => { if (value) await settings.load() })
 watch(() => settings.lowEnergyActive, async (value) => {
   if (value && router.currentRoute.value.path !== '/') await router.push('/')
@@ -50,6 +53,7 @@ async function leave() { await session.leave(); await router.push('/') }
       <button v-else class="text-button" type="button" @click="settings.showFullInterface">回到完整界面</button>
     </header>
     <RouterView />
+    <QuietCheckin v-if="!settings.lowEnergyActive && router.currentRoute.value.path !== '/'" />
     <footer v-if="!settings.lowEnergyActive" class="site-footer">
       <span>不评判每一次出现</span>
       <button class="logout-button" type="button" @click="leave">安静离开</button>
