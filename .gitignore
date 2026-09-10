@@ -9,3 +9,7 @@ frontend/playwright-report/
 .corepack/
 frontend/.idea/
 *.pyc
+
+# Product/design working documents stay local; keep the directory guide tracked.
+documents/*.md
+!documents/README.md
