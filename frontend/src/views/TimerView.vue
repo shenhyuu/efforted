@@ -30,8 +30,9 @@ onMounted(load); onBeforeUnmount(() => { if (ticker) window.clearInterval(ticker
 </script>
 
 <template><main class="single-page"><section class="timer-card">
-  <span class="eyebrow">弹性计时</span><h1>如果你想计个时。</h1><p class="lead">没有期限。歇一会儿之后，走过的时间仍然在。</p>
+  <div class="page-heading"><div><span class="eyebrow">弹性计时</span><h1>如果你想计个时。</h1><p class="lead">没有期限。歇一会儿之后，走过的时间仍然在。</p></div><span class="page-number" aria-hidden="true">02</span></div>
   <div :class="['breathing-orb', { active: timer?.status === 'running' }]">
+    <i class="orb-ring ring-one" aria-hidden="true"></i><i class="orb-ring ring-two" aria-hidden="true"></i>
     <span>{{ timer ? (timer.status === 'running' ? '此刻在走' : '先歇一会儿') : '随时可以开始' }}</span>
     <time v-if="timer && !settings.values.hide_all_numbers">{{ timeText }}</time>
   </div>
@@ -41,4 +42,5 @@ onMounted(load); onBeforeUnmount(() => { if (ticker) window.clearInterval(ticker
     <button v-else class="primary-action" type="button" :disabled="busy" @click="resume">我回来了</button>
     <button class="secondary-action" type="button" :disabled="busy" @click="close">今天就到这里</button></template>
   </div><p class="form-message">{{ message }}</p>
+  <div class="timer-principles" aria-label="计时说明"><span>可以暂停</span><i></i><span>不设目标</span><i></i><span>走过的都算数</span></div>
 </section></main></template>

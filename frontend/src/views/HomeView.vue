@@ -24,6 +24,20 @@ const energyOptions: Array<{ value: Energy; label: string }> = [
   { value: 'low', label: '低' }, { value: 'mid', label: '中' }, { value: 'enough', label: '够用' },
 ]
 const visibleRecords = computed(() => store.records.slice(0, 14))
+const todayCount = computed(() => store.records.filter((record) => {
+  if (!record.occurred_at || record.time_scope === 'past') return false
+  return new Date(record.occurred_at).toDateString() === new Date().toDateString()
+}).length)
+const energyMix = computed(() => {
+  const recent = store.records.slice(0, 7).filter((record) => record.energy)
+  if (!recent.length) return '还没有定义'
+  const counts = recent.reduce<Record<string, number>>((all, record) => {
+    if (record.energy) all[record.energy] = (all[record.energy] || 0) + 1
+    return all
+  }, {})
+  const value = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] as Energy | undefined
+  return value ? `${energyLabel(value)}电量居多` : '还没有定义'
+})
 
 function energyLabel(value: Energy | null) {
   return value ? energyOptions.find((item) => item.value === value)?.label : null
@@ -82,6 +96,10 @@ onMounted(async () => {
 
 <template>
   <main :class="['home-grid', { 'lite-home': settings.lowEnergyActive }]">
+    <header v-if="!settings.lowEnergyActive" class="home-welcome">
+      <div><span class="eyebrow">今日的留白</span><p>不用赶路，先确认自己在这里。</p></div>
+      <div class="welcome-line" aria-hidden="true"><i></i><i></i><i></i></div>
+    </header>
     <section class="presence-card" aria-labelledby="presence-title">
       <div class="intro">
         <span class="eyebrow">{{ settings.lowEnergyActive ? '现在' : '此刻' }}</span>
@@ -126,7 +144,12 @@ onMounted(async () => {
     <section v-if="!settings.lowEnergyActive" class="weave-card" aria-labelledby="weave-title">
       <div class="weave-heading">
         <div><span class="eyebrow">织痕布</span><h2 id="weave-title">走过的路</h2></div>
-        <span class="weave-key">每一根线，都是一次出现</span>
+        <span class="weave-key"><i></i>每一根线，都是一次出现</span>
+      </div>
+      <div v-if="store.hasRecords" class="weave-summary" aria-label="最近的织痕概览">
+        <div><span>今日</span><strong>{{ settings.values.hide_all_numbers ? '有来过' : `${todayCount} 根线` }}</strong></div>
+        <div><span>近七次</span><strong>{{ energyMix }}</strong></div>
+        <div><span>同步</span><strong>{{ store.records.some((item) => item.pending) ? '等待联结' : '已收好' }}</strong></div>
       </div>
       <div v-if="store.loading" class="empty-weave">正在轻轻展开。</div>
       <div v-else-if="!store.hasRecords" class="empty-weave">

@@ -1,10 +1,13 @@
 :root {
   --paper: #f4efe6;
+  --paper-deep: #e9dfd1;
+  --surface: rgba(252, 249, 243, 0.78);
   --ink: #3f3a34;
   --ink-soft: #81776b;
   --ink-faint: #aaa094;
   --line: rgba(88, 76, 62, 0.14);
-  --umber: #80644e;
+  --umber: #765944;
+  --umber-light: #aa8b70;
   --low: #8e9aa1;
   --mid: #aa8a70;
   --enough: #8d9477;
@@ -18,7 +21,7 @@
 * { box-sizing: border-box; }
 html, body { min-width: 320px; min-height: 100%; }
 body { margin: 0; min-height: 100vh; }
-button, textarea { font: inherit; }
+button, textarea, input { font: inherit; }
 button { color: inherit; }
 a { color: inherit; text-decoration: none; }
 button:focus-visible, textarea:focus-visible, a:focus-visible {
@@ -33,7 +36,7 @@ button:focus-visible, textarea:focus-visible, a:focus-visible {
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --paper: #191714; --ink: #e5ddd2; --ink-soft: #b3a89b; --ink-faint: #82786e;
+    --paper: #191714; --paper-deep: #26211c; --surface: rgba(38, 34, 29, .82); --ink: #e5ddd2; --ink-soft: #b3a89b; --ink-faint: #82786e;
     --line: rgba(230, 220, 205, .13); --umber: #b89578; color-scheme: dark;
   }
 }
