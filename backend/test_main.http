@@ -1,0 +1,40 @@
+GET http://127.0.0.1:8000/health
+Accept: application/json
+
+###
+
+POST http://127.0.0.1:8000/api/v1/checkins
+Content-Type: application/json
+
+{}
+
+###
+
+POST http://127.0.0.1:8000/api/v1/checkins
+Content-Type: application/json
+
+{
+  "energy": "low",
+  "note": "我在这里"
+}
+
+###
+
+POST http://127.0.0.1:8000/api/v1/records/backfill
+Content-Type: application/json
+
+{
+  "note": "过去的一点痕迹"
+}
+
+###
+
+GET http://127.0.0.1:8000/api/v1/records
+Accept: application/json
+
+###
+
+GET http://127.0.0.1:8000/api/v1/weave
+Accept: application/json
+
+###

@@ -1,0 +1,10 @@
+{
+  "name": "织痕",
+  "short_name": "织痕",
+  "description": "轻轻记下你曾在这里。",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f4efe6",
+  "theme_color": "#f4efe6",
+  "icons": []
+}
