@@ -1,8 +1,10 @@
-const CACHE = 'zhihen-shell-v3'
-const SHELL = ['/', '/backfill', '/lamp', '/timeline', '/manifest.webmanifest', '/icon.svg', '/favicon.ico']
+const CACHE = 'zhihen-shell-v4'
+const SHELL = ['/', '/backfill', '/lamps', '/timeline', '/manifest.webmanifest', '/icon.svg', '/favicon.ico']
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)))
+  event.waitUntil(caches.open(CACHE).then((cache) => Promise.allSettled(
+    SHELL.map((url) => cache.add(url)),
+  )))
   self.skipWaiting()
 })
 

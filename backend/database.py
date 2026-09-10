@@ -7,6 +7,7 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
 DATABASE_PATH = Path(os.getenv("ZHIHEN_DB_PATH", BASE_DIR / "data" / "zhihen.db"))
+SCHEMA_VERSION = 2
 
 
 def connect() -> sqlite3.Connection:
@@ -149,4 +150,9 @@ def initialize_database() -> None:
                 connection.execute(
                     f"ALTER TABLE user_settings ADD COLUMN {column} INTEGER NOT NULL DEFAULT 0"
                 )
+        if "privacy_mode" not in settings_columns:
+            connection.execute(
+                "ALTER TABLE user_settings ADD COLUMN privacy_mode INTEGER NOT NULL DEFAULT 0"
+            )
+        connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         connection.commit()

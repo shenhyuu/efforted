@@ -27,10 +27,12 @@ const energyOptions: Array<{ value: Energy; label: string }> = [
   { value: 'low', label: '低' }, { value: 'mid', label: '中' }, { value: 'enough', label: '够用' },
 ]
 const visibleRecords = computed(() => store.records.slice(0, 14))
-const todayCount = computed(() => store.records.filter((record) => {
-  if (!record.occurred_at || record.time_scope === 'past') return false
-  return new Date(record.occurred_at).toDateString() === new Date().toDateString()
-}).length)
+const todayCount = computed(() => {
+  const today = new Date().toISOString().slice(0, 10)
+  const wovenToday = weave.value?.days.find((item) => item.day === today)
+  if (wovenToday) return wovenToday.threads.reduce((total, thread) => total + thread.count, 0)
+  return store.records.filter((record) => record.occurred_at?.slice(0, 10) === today).length
+})
 const energyMix = computed(() => {
   const recent = store.records.slice(0, 7).filter((record) => record.energy)
   if (!recent.length) return '还没有定义'

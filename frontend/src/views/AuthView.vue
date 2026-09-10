@@ -20,6 +20,7 @@ async function submit() {
       <h1>{{ session.initialized ? '欢迎回来。' : '先留一把钥匙。' }}</h1>
       <p>{{ session.initialized ? '这里还保留着你留下的痕迹。' : '密码只用来守住这台设备里的记录。' }}</p>
       <form @submit.prevent="submit">
+        <input class="auth-username" type="text" name="username" autocomplete="username" value="me" tabindex="-1" aria-hidden="true">
         <label for="password">{{ session.initialized ? '密码' : '设置密码，至少六位' }}</label>
         <input id="password" v-model="password" type="password" minlength="6" maxlength="128" autocomplete="current-password">
         <button type="submit" :disabled="password.length < 6 || busy">{{ busy ? '正在打开' : '进入织痕' }}</button>

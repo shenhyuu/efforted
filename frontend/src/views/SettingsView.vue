@@ -73,7 +73,7 @@ async function exportPng() {
     <button type="button" @click="toggle('hide_all_numbers')"><span><strong>隐藏数字</strong><small>不显示计时与日期数字</small></span><i :class="{ on: settings.values.hide_all_numbers }"></i></button>
     <button type="button" @click="toggle('nothing_mode')"><span><strong>什么都不做模式</strong><small>不出现回顾与提示</small></span><i :class="{ on: settings.values.nothing_mode }"></i></button>
     <button type="button" @click="toggle('weekly_report_opt_out')"><span><strong>不被总结</strong><small>回看页面不生成七天整理</small></span><i :class="{ on: settings.values.weekly_report_opt_out }"></i></button>
-    <button type="button" @click="toggle('privacy_mode')"><span><strong>共用设备保护</strong><small>系统通知只保留中性的标题与文字</small></span><i :class="{ on: settings.values.privacy_mode }"></i></button>
+    <button type="button" @click="toggle('privacy_mode')"><span><strong>共用设备保护</strong><small>隐藏系统通知中的应用名称与记录线索</small></span><i :class="{ on: settings.values.privacy_mode }"></i></button>
     <button type="button" @click="toggleEcho"><span><strong>一条回声</strong><small>久未留下新痕迹时最多送回一条存在确认，默认关闭</small></span><i :class="{ on: settings.values.notify_enabled }"></i></button>
   </div>
   <div class="appearance-setting"><h2>界面明暗</h2><div class="choice-row" role="group" aria-label="界面明暗">

@@ -4,7 +4,7 @@ import asyncio
 import json
 import sqlite3
 from contextlib import asynccontextmanager, closing
-from datetime import datetime, time, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Annotated, Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response, status
@@ -192,7 +192,13 @@ async def root() -> dict[str, str]:
 
 
 @app.get("/health")
+@app.get("/api/v1/health")
 async def health() -> dict[str, str]:
+    try:
+        with closing(connect()) as connection:
+            connection.execute("SELECT 1").fetchone()
+    except sqlite3.Error as error:
+        raise friendly(503, "DATABASE_UNAVAILABLE", "数据存储暂时没有回应。") from error
     return {"status": "ok"}
 
 
@@ -281,9 +287,18 @@ async def create_checkin(user_id: AuthUser, payload: CheckinCreate | None = None
 
 @app.post("/api/v1/checkins/batch")
 async def batch_checkins(payload: BatchCheckinCreate, user_id: AuthUser) -> dict[str, int]:
-    accepted = duplicates = 0
+    accepted = duplicates = invalid = 0
     with closing(connect()) as connection:
         for item in payload.items:
+            if (
+                item.client_created_at is not None
+                and (
+                    item.client_created_at.tzinfo is None
+                    or item.client_created_at.astimezone(timezone.utc) > utc_now() + timedelta(minutes=5)
+                )
+            ):
+                invalid += 1
+                continue
             occurred = iso(item.client_created_at) if item.client_created_at else iso()
             _, created = insert_record(
                 connection, user_id, kind="checkin", occurred_at=occurred, time_scope="exact",
@@ -293,7 +308,11 @@ async def batch_checkins(payload: BatchCheckinCreate, user_id: AuthUser) -> dict
             accepted += int(created)
             duplicates += int(not created)
         connection.commit()
-    return {"accepted": accepted, "duplicates_ignored": duplicates}
+    return {
+        "accepted": accepted,
+        "duplicates_ignored": duplicates,
+        "invalid_ignored": invalid,
+    }
 
 
 @app.post("/api/v1/records/backfill", status_code=201)
@@ -318,12 +337,19 @@ async def list_records(
     user_id: AuthUser,
     limit: Annotated[int, Query(ge=1, le=200)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
+    day: date | None = None,
 ) -> dict[str, object]:
     with closing(connect()) as connection:
+        where = "user_id=?"
+        parameters: list[object] = [user_id]
+        if day is not None:
+            where += " AND time_scope='exact' AND substr(occurred_at,1,10)=?"
+            parameters.append(day.isoformat())
+        parameters.extend((limit, offset))
         rows = connection.execute(
-            """SELECT * FROM records WHERE user_id=?
+            f"""SELECT * FROM records WHERE {where}
                ORDER BY CASE WHEN time_scope='exact' THEN 0 ELSE 1 END,
-                         occurred_at DESC,created_at DESC LIMIT ? OFFSET ?""", (user_id, limit, offset)
+                         occurred_at DESC,created_at DESC LIMIT ? OFFSET ?""", parameters
         ).fetchall()
     next_cursor = offset + len(rows) if len(rows) == limit else None
     return {"items": [row_record(row) for row in rows], "next_cursor": next_cursor}
@@ -382,15 +408,16 @@ async def weave(
             "SELECT energy,count(*) count FROM records WHERE user_id=? AND time_scope='past' GROUP BY energy", (user_id,)
         ).fetchall()
         last = connection.execute(
-            "SELECT occurred_at FROM records WHERE user_id=? AND occurred_at IS NOT NULL ORDER BY occurred_at DESC LIMIT 1", (user_id,)
+            """SELECT COALESCE(occurred_at,created_at) activity_at FROM records
+               WHERE user_id=? ORDER BY activity_at DESC LIMIT 1""", (user_id,)
         ).fetchone()
     grouped: dict[str, list[dict[str, object]]] = {}
     for row in rows:
         grouped.setdefault(row["day"], []).append({"energy": row["energy"], "count": row["count"]})
     temperature = 1.0
     if last:
-        days = max(0, (utc_now() - parse_iso(last["occurred_at"])).days)
-        temperature = max(0.15, 1 - days / 90)
+        elapsed_days = max(0, (utc_now() - parse_iso(last["activity_at"])).days)
+        temperature = max(0.15, 1 - elapsed_days / 90)
     return {
         "days": [{"day": day, "threads": threads} for day, threads in grouped.items()],
         "past": {"label": "过去", "threads": [{"energy": r["energy"], "count": r["count"]} for r in past]},
@@ -402,16 +429,17 @@ async def weave(
 async def comeback(user_id: AuthUser) -> dict[str, object]:
     with closing(connect()) as connection:
         rows = connection.execute(
-            "SELECT occurred_at,content FROM records WHERE user_id=? AND occurred_at IS NOT NULL ORDER BY occurred_at", (user_id,)
+            """SELECT COALESCE(occurred_at,created_at) activity_at,content FROM records
+               WHERE user_id=? ORDER BY activity_at""", (user_id,)
         ).fetchall()
     if not rows:
         return {"is_comeback": False}
-    last_time = parse_iso(rows[-1]["occurred_at"])
+    last_time = parse_iso(rows[-1]["activity_at"])
     gap_days = (utc_now() - last_time).days
     restart_count = 0
     previous = None
     for row in rows:
-        current = parse_iso(row["occurred_at"])
+        current = parse_iso(row["activity_at"])
         if previous and (current - previous).days >= 7:
             restart_count += 1
         previous = current
@@ -419,7 +447,7 @@ async def comeback(user_id: AuthUser) -> dict[str, object]:
         return {"is_comeback": False}
     hint = rows[-1]["content"]
     return {"is_comeback": True, "card": {
-        "last_left_at": rows[-1]["occurred_at"],
+        "last_left_at": rows[-1]["activity_at"],
         "last_left_hint": f"你上一次离开前，记下的是「{hint}」。" if hint else "你上一次留下的痕迹还在这里。",
         "restart_count": restart_count + 1, "message": "你回来了。过去的痕迹还在这里。",
     }, "options": [
@@ -620,7 +648,7 @@ async def weekly_reflection(user_id: AuthUser) -> dict[str, object]:
 async def deliver_echo(user_id: AuthUser) -> dict[str, object]:
     with closing(connect()) as connection:
         settings = connection.execute(
-            "SELECT notify_enabled,nothing_mode FROM user_settings WHERE user_id=?", (user_id,)
+            "SELECT notify_enabled,nothing_mode,privacy_mode FROM user_settings WHERE user_id=?", (user_id,)
         ).fetchone()
         if not settings["notify_enabled"] or settings["nothing_mode"]:
             return {"echo": None}
@@ -641,6 +669,8 @@ async def deliver_echo(user_id: AuthUser) -> dict[str, object]:
             (user_id, latest["id"], iso()),
         )
         connection.commit()
+    if settings["privacy_mode"]:
+        return {"echo": {"title": "提醒", "message": "有一条留给你的消息。"}}
     return {"echo": {"title": "织痕", "message": "有一段痕迹仍在这里。"}}
 
 

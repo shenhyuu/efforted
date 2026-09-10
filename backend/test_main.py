@@ -61,6 +61,14 @@ class ApiDomainTests(unittest.TestCase):
         asyncio.run(main.cancel_purge(self.user_id))
         self.assertFalse(asyncio.run(main.purge_status(self.user_id))["pending"])
 
+    def test_database_records_schema_version(self) -> None:
+        connection = database.connect()
+        try:
+            version = connection.execute("PRAGMA user_version").fetchone()[0]
+        finally:
+            connection.close()
+        self.assertEqual(version, database.SCHEMA_VERSION)
+
 
 if __name__ == "__main__":
     unittest.main()

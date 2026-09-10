@@ -12,7 +12,8 @@ export const useRecordsStore = defineStore('records', () => {
     const pending = await offlineQueuedRecords().catch(() => [])
     try {
       await flushOfflineCheckins()
-      records.value = await api.getAllRecords()
+      const page = await api.getRecords(0, 50)
+      records.value = page.items
     } catch (reason) {
       records.value = pending
       if (!pending.length) error.value = reason instanceof Error ? reason.message : '这里暂时没有回应。'

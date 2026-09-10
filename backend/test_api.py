@@ -35,11 +35,16 @@ def test_batch_is_idempotent_and_rejects_future_time(client: TestClient):
     item = {"client_uuid": "offline-1", "client_created_at": iso()}
     first = client.post("/api/v1/checkins/batch", headers=headers, json={"items": [item]})
     second = client.post("/api/v1/checkins/batch", headers=headers, json={"items": [item]})
-    assert first.json() == {"accepted": 1, "duplicates_ignored": 0}
-    assert second.json() == {"accepted": 0, "duplicates_ignored": 1}
+    assert first.json() == {"accepted": 1, "duplicates_ignored": 0, "invalid_ignored": 0}
+    assert second.json() == {"accepted": 0, "duplicates_ignored": 1, "invalid_ignored": 0}
 
     future = {**item, "client_uuid": "offline-2", "client_created_at": iso(utc_now() + timedelta(hours=1))}
-    assert client.post("/api/v1/checkins/batch", headers=headers, json={"items": [future]}).status_code == 422
+    valid = {**item, "client_uuid": "offline-3"}
+    mixed = client.post(
+        "/api/v1/checkins/batch", headers=headers, json={"items": [future, valid]}
+    )
+    assert mixed.status_code == 200
+    assert mixed.json() == {"accepted": 1, "duplicates_ignored": 0, "invalid_ignored": 1}
 
 
 def test_due_purge_runs_without_a_followup_api_request(client: TestClient):
@@ -138,6 +143,26 @@ def test_echo_is_opt_in_neutral_and_delivered_once_per_old_anchor(client: TestCl
     assert client.post("/api/v1/echo", headers=headers).json() == {"echo": None}
 
 
+def test_privacy_mode_removes_product_and_record_clues_from_echo(client: TestClient):
+    headers = setup_headers(client)
+    old = iso(utc_now() - timedelta(days=15))
+    with database.connect() as connection:
+        connection.execute(
+            """INSERT INTO records
+               (user_id,kind,occurred_at,time_scope,created_at)
+               VALUES(1,'checkin',?,'exact',?)""",
+            (old, old),
+        )
+        connection.commit()
+    client.patch(
+        "/api/v1/settings", headers=headers,
+        json={"notify_enabled": True, "privacy_mode": True},
+    )
+    assert client.post("/api/v1/echo", headers=headers).json()["echo"] == {
+        "title": "提醒", "message": "有一条留给你的消息。",
+    }
+
+
 def test_future_backfill_is_rejected_and_weave_honors_window(client: TestClient):
     headers = setup_headers(client)
     tomorrow = (date.today() + timedelta(days=1)).isoformat()
@@ -190,3 +215,38 @@ def test_comeback_has_neutral_context_and_equal_options(client: TestClient):
     assert result["is_comeback"] is True
     assert "读到第四章" in result["card"]["last_left_hint"]
     assert [option["id"] for option in result["options"]] == ["backfill", "fresh"]
+
+
+def test_past_record_creation_time_drives_ember_and_comeback(client: TestClient):
+    headers = setup_headers(client)
+    old = iso(utc_now() - timedelta(days=30))
+    with database.connect() as connection:
+        connection.execute(
+            """INSERT INTO records(user_id,kind,occurred_at,time_scope,content,created_at)
+               VALUES(1,'backfill',NULL,'past','没有具体日期',?)""",
+            (old,),
+        )
+        connection.commit()
+    assert client.get("/api/v1/weave", headers=headers).json()["ember"]["temperature"] < 1
+    result = client.get("/api/v1/comeback", headers=headers).json()
+    assert result["is_comeback"] is True
+    assert result["card"]["last_left_at"] == old
+
+
+def test_records_can_be_filtered_by_day_and_paginated(client: TestClient):
+    headers = setup_headers(client)
+    today = utc_now().date().isoformat()
+    for _ in range(3):
+        assert client.post("/api/v1/checkins", headers=headers, json={}).status_code == 201
+    first = client.get(f"/api/v1/records?day={today}&limit=2", headers=headers).json()
+    second = client.get(
+        f"/api/v1/records?day={today}&limit=2&offset={first['next_cursor']}", headers=headers
+    ).json()
+    assert len(first["items"]) == 2
+    assert len(second["items"]) == 1
+    assert second["next_cursor"] is None
+
+
+def test_health_is_available_inside_and_outside_api_prefix(client: TestClient):
+    assert client.get("/health").json() == {"status": "ok"}
+    assert client.get("/api/v1/health").json() == {"status": "ok"}

@@ -34,4 +34,14 @@ describe('offline check-in queue', () => {
     expect(await flushOfflineCheckins()).toBe(1)
     expect(await offlineQueuedRecords()).toHaveLength(0)
   })
+
+  it('clears a mixed batch after the server isolates an invalid timestamp', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('offline')))
+    await api.checkin({ client_uuid: 'offline-3' })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      accepted: 0, duplicates_ignored: 0, invalid_ignored: 1,
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
+    expect(await flushOfflineCheckins()).toBe(0)
+    expect(await offlineQueuedRecords()).toHaveLength(0)
+  })
 })

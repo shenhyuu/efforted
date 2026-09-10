@@ -153,9 +153,11 @@ async function removeQueued(ids: string[]): Promise<void> {
 export async function flushOfflineCheckins() {
   const items = await queuedItems()
   if (!items.length || !token.get()) return 0
-  await request('/checkins/batch', { method: 'POST', body: JSON.stringify({ items }) })
+  const result = await request<{ accepted: number; duplicates_ignored: number; invalid_ignored: number }>(
+    '/checkins/batch', { method: 'POST', body: JSON.stringify({ items }) },
+  )
   await removeQueued(items.map((item) => item.client_uuid))
-  return items.length
+  return result.accepted + result.duplicates_ignored
 }
 
 export async function offlineQueuedRecords(): Promise<RecordItem[]> {
@@ -179,7 +181,11 @@ export const api = {
   setup: (password: string) => request<{ token: string }>('/auth/setup', { method: 'POST', body: JSON.stringify({ password }) }, false),
   login: (password: string) => request<{ token: string }>('/auth/login', { method: 'POST', body: JSON.stringify({ password }) }, false),
   logout: () => request<void>('/auth/logout', { method: 'POST' }),
-  getRecords: (offset = 0) => request<{ items: RecordItem[]; next_cursor: number | null }>(`/records?limit=200&offset=${offset}`),
+  getRecords: (offset = 0, limit = 50, day?: string) => {
+    const query = new URLSearchParams({ limit: String(limit), offset: String(offset) })
+    if (day) query.set('day', day)
+    return request<{ items: RecordItem[]; next_cursor: number | null }>(`/records?${query}`)
+  },
   async getAllRecords() {
     const items: RecordItem[] = []
     let offset = 0

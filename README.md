@@ -29,6 +29,15 @@ npm run dev
 
 前端开发服务器会将 `/api` 代理到后端。数据默认保存在 `backend/data/zhihen.db`，也可通过 `ZHIHEN_DB_PATH` 指定其他路径。
 
+需要验收能量配色、跨日织痕、补记、计时与灯时，可生成与真实数据隔离的演示库：
+
+```powershell
+.\backend\.venv\Scripts\python.exe scripts\seed_demo.py
+$env:ZHIHEN_DB_PATH = (Resolve-Path backend\data\demo.db)
+```
+
+脚本默认密码为 `demo-only`，不会隐式覆盖正式库；重复生成需显式传入 `--force`。
+
 产品和工程约定见 [documents/README.md](./documents/README.md)。
 
 ## 验证
@@ -48,3 +57,4 @@ npm run test:e2e --prefix frontend
 ```
 
 生产环境参考配置位于 `deploy/`；部署前需要替换域名并配置 TLS 证书路径。
+备份后可在服务器运行 `deploy/restore-verify.sh /var/backups/zhihen/<备份文件>`，用临时恢复副本执行完整性检查与核心表计数。

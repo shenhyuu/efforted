@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { api, type DaySlot, type Energy, type RecordItem } from '@/api'
 import EffortUnitPicker from '@/components/EffortUnitPicker.vue'
@@ -7,6 +7,8 @@ import EffortUnitPicker from '@/components/EffortUnitPicker.vue'
 const route = useRoute()
 const records = ref<RecordItem[]>([])
 const loading = ref(true)
+const loadingMore = ref(false)
+const nextCursor = ref<number | null>(0)
 const message = ref('')
 const editing = ref<RecordItem | null>(null)
 const editDay = ref('')
@@ -57,15 +59,30 @@ async function remove(record: RecordItem) {
   try {
     await api.deleteRecord(record.id)
     records.value = records.value.filter((item) => item.id !== record.id)
+    if (nextCursor.value !== null) nextCursor.value = Math.max(0, nextCursor.value - 1)
     if (editing.value?.id === record.id) editing.value = null
     message.value = '这段痕迹已经移走。'
   } catch (reason) { message.value = reason instanceof Error ? reason.message : '这段痕迹暂时没有回应。' }
 }
-onMounted(async () => {
-  try { records.value = await api.getAllRecords() }
+async function load(reset = false) {
+  if (reset) {
+    records.value = []
+    nextCursor.value = 0
+    loading.value = true
+  } else {
+    if (nextCursor.value === null || loadingMore.value) return
+    loadingMore.value = true
+  }
+  try {
+    const page = await api.getRecords(nextCursor.value || 0, 50, selectedDay.value || undefined)
+    records.value.push(...page.items)
+    nextCursor.value = page.next_cursor
+  }
   catch (reason) { message.value = reason instanceof Error ? reason.message : '痕迹流暂时没有展开。' }
-  finally { loading.value = false }
-})
+  finally { loading.value = false; loadingMore.value = false }
+}
+onMounted(() => load(true))
+watch(selectedDay, () => load(true))
 </script>
 
 <template>
@@ -81,6 +98,9 @@ onMounted(async () => {
         <button type="button" :disabled="record.pending" @click="openEditor(record)">{{ record.pending ? '等待同步' : '整理' }}</button>
       </li>
     </ol>
+    <button v-if="nextCursor !== null" class="quiet-action timeline-more" type="button" :disabled="loadingMore" @click="load()">
+      {{ loadingMore ? '正在继续展开' : '再展开一些' }}
+    </button>
     <form v-if="editing" class="gentle-form record-editor" @submit.prevent="save">
       <div class="editor-heading"><h2>整理这段痕迹</h2><button class="text-button" type="button" @click="editing = null">合上</button></div>
       <label>哪一天 <small>留空时归入过去</small><input v-model="editDay" type="date" :max="new Date().toISOString().slice(0, 10)"></label>
