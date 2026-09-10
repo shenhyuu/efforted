@@ -57,6 +57,7 @@ def initialize_database() -> None:
                 day_slot TEXT CHECK (day_slot IN ('morning','afternoon','evening','night') OR day_slot IS NULL),
                 energy TEXT CHECK (energy IN ('low','mid','enough') OR energy IS NULL),
                 content TEXT,
+                effort_unit TEXT,
                 duration_seconds INTEGER,
                 timer_id INTEGER,
                 created_at TEXT NOT NULL,
@@ -99,8 +100,11 @@ def initialize_database() -> None:
             CREATE TABLE IF NOT EXISTS user_settings (
                 user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
                 low_energy_mode INTEGER NOT NULL DEFAULT 0,
+                auto_low_energy_mode INTEGER NOT NULL DEFAULT 0,
                 hide_all_numbers INTEGER NOT NULL DEFAULT 0,
                 nothing_mode INTEGER NOT NULL DEFAULT 0,
+                notify_enabled INTEGER NOT NULL DEFAULT 0,
+                weekly_report_opt_out INTEGER NOT NULL DEFAULT 0,
                 privacy_mode INTEGER NOT NULL DEFAULT 0,
                 updated_at TEXT NOT NULL
             );
@@ -109,6 +113,14 @@ def initialize_database() -> None:
                 user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
                 requested_at TEXT NOT NULL,
                 execute_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS echo_deliveries (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                anchor_record_id INTEGER NOT NULL REFERENCES records(id) ON DELETE CASCADE,
+                delivered_at TEXT NOT NULL,
+                UNIQUE(user_id, anchor_record_id)
             );
 
             CREATE TABLE IF NOT EXISTS login_attempts (
@@ -120,4 +132,21 @@ def initialize_database() -> None:
                 ON login_attempts(address, attempted_at);
             """
         )
+        record_columns = {
+            row["name"] for row in connection.execute("PRAGMA table_info(records)")
+        }
+        if "effort_unit" not in record_columns:
+            connection.execute("ALTER TABLE records ADD COLUMN effort_unit TEXT")
+        settings_columns = {
+            row["name"] for row in connection.execute("PRAGMA table_info(user_settings)")
+        }
+        if "auto_low_energy_mode" not in settings_columns:
+            connection.execute(
+                "ALTER TABLE user_settings ADD COLUMN auto_low_energy_mode INTEGER NOT NULL DEFAULT 0"
+            )
+        for column in ("notify_enabled", "weekly_report_opt_out"):
+            if column not in settings_columns:
+                connection.execute(
+                    f"ALTER TABLE user_settings ADD COLUMN {column} INTEGER NOT NULL DEFAULT 0"
+                )
         connection.commit()

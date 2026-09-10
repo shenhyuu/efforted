@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { api, type RecordItem } from '@/api'
+import { api, type RecordItem, type SettingsUpdate } from '@/api'
 import { useSettingsStore } from '@/stores/settings'
 
 const settings = useSettingsStore(), router = useRouter()
@@ -17,9 +17,25 @@ async function perform(action: () => Promise<void>) {
   finally { busy.value = false }
 }
 onMounted(async () => { await settings.load(); await perform(async () => { purge.value = await api.purgeStatus(); help.value = await api.help() }) })
-async function toggle(key: keyof typeof settings.values) {
+async function toggle(key: keyof SettingsUpdate) {
   const updated = await settings.update({ [key]: !settings.values[key] })
   if (updated && key === 'low_energy_mode' && settings.values.low_energy_mode) await router.push('/')
+}
+async function toggleEcho() {
+  if (settings.values.notify_enabled) {
+    await settings.update({ notify_enabled: false })
+    return
+  }
+  if (!('Notification' in window)) {
+    note.value = '这个浏览器暂时不提供系统通知。'
+    return
+  }
+  const permission = await Notification.requestPermission()
+  if (permission !== 'granted') {
+    note.value = '系统通知没有开启，回声会继续保持安静。'
+    return
+  }
+  await settings.update({ notify_enabled: true })
 }
 async function makeAsh() {
   if (!window.confirm('文字与灯会被立即物理删除，织痕图案仍会留下。确认继续吗？')) return
@@ -53,8 +69,11 @@ async function exportPng() {
   <span class="eyebrow">设置与数据</span><h1>这里由你决定。</h1><p class="lead">所有开关都可以随时改变。数据也始终属于你。</p>
   <div class="setting-list">
     <button type="button" @click="toggle('low_energy_mode')"><span><strong>低能量模式</strong><small>界面只保留最轻的一步</small></span><i :class="{ on: settings.values.low_energy_mode }"></i></button>
+    <button type="button" @click="toggle('auto_low_energy_mode')"><span><strong>安静简化界面</strong><small>三天没有新痕迹时自动只保留最轻的一步，不发送通知</small></span><i :class="{ on: settings.values.auto_low_energy_mode }"></i></button>
     <button type="button" @click="toggle('hide_all_numbers')"><span><strong>隐藏数字</strong><small>不显示计时与日期数字</small></span><i :class="{ on: settings.values.hide_all_numbers }"></i></button>
     <button type="button" @click="toggle('nothing_mode')"><span><strong>什么都不做模式</strong><small>不出现回顾与提示</small></span><i :class="{ on: settings.values.nothing_mode }"></i></button>
+    <button type="button" @click="toggle('weekly_report_opt_out')"><span><strong>不被总结</strong><small>回看页面不生成七天整理</small></span><i :class="{ on: settings.values.weekly_report_opt_out }"></i></button>
+    <button type="button" @click="toggleEcho"><span><strong>一条回声</strong><small>久未留下新痕迹时最多送回一条存在确认，默认关闭</small></span><i :class="{ on: settings.values.notify_enabled }"></i></button>
   </div>
   <div class="data-actions"><h2>带走或放下</h2><div><button type="button" @click="api.exportJson">导出 JSON</button><button type="button" @click="exportPng">导出织痕长卷</button><button type="button" @click="makeAsh">灰烬模式</button></div>
     <div v-if="purge.pending" class="purge-pending"><p>清空将在 {{ purge.grace_until ? new Date(purge.grace_until).toLocaleString('zh-CN') : '' }} 后执行。</p><button type="button" @click="cancelPurge">撤销清空</button></div>

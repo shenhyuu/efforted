@@ -48,6 +48,7 @@ h1 { margin: 12px 0 13px; font-size: clamp(34px, 4vw, 47px); letter-spacing: 0.0
 .note-editor { text-align: left; }
 .note-editor label { display: block; margin-bottom: 8px; color: var(--ink-soft); font-size: 11px; }
 .note-editor textarea { width: 100%; resize: none; padding: 11px 13px; border: 1px solid var(--line); border-radius: 12px; color: var(--ink); background: rgba(255,255,255,.42); line-height: 1.7; }
+.speech-action { margin-top: 8px; }.speech-message { display: block; margin-top: 7px; color: var(--ink-faint); font-size: 10px; }
 .settled-message, .soft-error { position: absolute; bottom: 57px; margin: 0; font-size: 12px; }
 .settled-message { color: var(--umber); } .soft-error { color: #7b625a; }
 .permission { position: absolute; bottom: 29px; margin: 0; color: var(--ink-faint); font-size: 11px; letter-spacing: .08em; }
@@ -124,6 +125,13 @@ h1 { margin: 12px 0 13px; font-size: clamp(34px, 4vw, 47px); letter-spacing: 0.0
 .choice-row { display: flex; flex-wrap: wrap; gap: 8px; }
 .choice-row button, .secondary-action, .data-actions button, .purge-pending button { padding: 9px 17px; border: 1px solid var(--line); border-radius: 99px; background: rgba(255,255,255,.35); color: var(--ink-soft); cursor: pointer; }
 .choice-row button.selected { border-color: var(--umber); color: var(--ink); background: rgba(255,255,255,.8); }
+.effort-unit-picker { position: relative; z-index: 1; width: 100%; margin: 0; padding: 0; border: 0; text-align: left; }
+.effort-unit-picker legend { margin-bottom: 10px; color: var(--ink-soft); font-size: 12px; }
+.effort-unit-picker legend small { color: var(--ink-faint); margin-left: 6px; }
+.effort-unit-picker details { margin-top: 10px; color: var(--ink-faint); font-size: 11px; }
+.effort-unit-picker summary { width: fit-content; cursor: pointer; }
+.effort-unit-picker input { width: 100%; margin-top: 9px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: rgba(255,255,255,.4); color: var(--ink); }
+.presence-card > .effort-unit-picker { margin-top: 20px; }.presence-card > .effort-unit-picker .choice-row { justify-content: center; }
 .form-message { min-height: 22px; margin: 18px 0 0; color: var(--ink-soft); font-size: 12px; text-align: center; }
 .comeback-message { margin-top: 10px !important; color: var(--umber) !important; }
 
@@ -147,6 +155,9 @@ h1 { margin: 12px 0 13px; font-size: clamp(34px, 4vw, 47px); letter-spacing: 0.0
 .opened-lamp > span { color: var(--ink-faint); font-size: 11px; }.opened-lamp blockquote { margin: 24px 0; font-family: 'Songti SC',SimSun,serif; font-size: 23px; line-height: 1.8; }
 
 .wide-card { width: min(100%,820px); }
+.reflection-card { text-align: center; }.reflection-card .primary-action { margin-top: 20px; }
+.reflection-lines, .quiet-panel { margin-top: 30px; padding: 24px; border-radius: 18px; background: rgba(255,255,255,.28); color: var(--ink-soft); line-height: 1.9; }
+.reflection-lines p { margin: 6px 0; }
 .setting-list { display: grid; margin-top: 34px; border-top: 1px solid var(--line); }
 .setting-list > button { display: flex; justify-content: space-between; align-items: center; padding: 18px 4px; border: 0; border-bottom: 1px solid var(--line); background: none; text-align: left; cursor: pointer; }
 .setting-list span { display: grid; gap: 5px; }.setting-list strong { font-weight: 500; }.setting-list small { color: var(--ink-faint); }

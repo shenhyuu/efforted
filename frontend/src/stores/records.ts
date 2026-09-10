@@ -19,7 +19,7 @@ export const useRecordsStore = defineStore('records', () => {
     }
     finally { loading.value = false }
   }
-  async function checkin(input: { energy?: Energy; note?: string }) {
+  async function checkin(input: { energy?: Energy; note?: string; effort_unit?: string }) {
     saving.value = true; error.value = null
     try {
       const record = await api.checkin({ ...input, client_uuid: crypto.randomUUID() })

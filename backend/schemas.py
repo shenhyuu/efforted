@@ -18,6 +18,7 @@ class CheckinCreate(BaseModel):
     client_uuid: str | None = Field(default=None, min_length=1, max_length=80)
     energy: Energy | None = None
     note: str | None = Field(default=None, max_length=500)
+    effort_unit: str | None = Field(default=None, max_length=40)
 
 
 class BatchCheckinItem(CheckinCreate):
@@ -46,6 +47,7 @@ class BackfillCreate(BaseModel):
     day_slot: DaySlot | None = None
     energy: Energy | None = None
     note: str | None = Field(default=None, max_length=500)
+    effort_unit: str | None = Field(default=None, max_length=40)
 
 
 class RecordUpdate(BaseModel):
@@ -53,6 +55,7 @@ class RecordUpdate(BaseModel):
     day_slot: DaySlot | None = None
     energy: Energy | None = None
     content: str | None = Field(default=None, max_length=500)
+    effort_unit: str | None = Field(default=None, max_length=40)
 
 
 class LampCreate(BaseModel):
@@ -63,8 +66,11 @@ class LampCreate(BaseModel):
 
 class SettingsUpdate(BaseModel):
     low_energy_mode: bool | None = None
+    auto_low_energy_mode: bool | None = None
     hide_all_numbers: bool | None = None
     nothing_mode: bool | None = None
+    notify_enabled: bool | None = None
+    weekly_report_opt_out: bool | None = None
     privacy_mode: bool | None = None
 
 

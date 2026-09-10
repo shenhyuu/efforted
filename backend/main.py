@@ -32,6 +32,7 @@ def row_record(row: sqlite3.Row) -> dict[str, object]:
         "id": row["id"], "occurred_at": row["occurred_at"], "time_scope": scope,
         "time_label": "过去" if scope == "past" else None, "day_slot": row["day_slot"],
         "energy": row["energy"], "content": row["content"],
+        "effort_unit": row["effort_unit"],
         "duration_seconds": row["duration_seconds"], "ash": bool(row["ash"]),
         "created_at": row["created_at"],
     }
@@ -115,7 +116,7 @@ def insert_record(
     connection: sqlite3.Connection, user_id: int, *, kind: str, occurred_at: str | None,
     time_scope: str, energy: str | None, content: str | None, day_slot: str | None = None,
     client_uuid: str | None = None, duration_seconds: int | None = None,
-    timer_id: int | None = None,
+    timer_id: int | None = None, effort_unit: str | None = None,
 ) -> tuple[dict[str, object], bool]:
     if client_uuid:
         existing = connection.execute(
@@ -126,10 +127,10 @@ def insert_record(
     cursor = connection.execute(
         """INSERT INTO records
            (user_id,client_uuid,kind,occurred_at,time_scope,day_slot,energy,content,
-            duration_seconds,timer_id,created_at)
-           VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+            effort_unit,duration_seconds,timer_id,created_at)
+           VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
         (user_id, client_uuid, kind, occurred_at, time_scope, day_slot, energy,
-         content or None, duration_seconds, timer_id, iso()),
+         content or None, effort_unit or None, duration_seconds, timer_id, iso()),
     )
     row = connection.execute("SELECT * FROM records WHERE id=?", (cursor.lastrowid,)).fetchone()
     if row is None:
@@ -160,7 +161,7 @@ async def lifespan(_: FastAPI):
         await task
 
 
-app = FastAPI(title="织痕 API", description="记录出现过的时刻，不评价它们。", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="织痕 API", description="记录出现过的时刻，不评价它们。", version="1.1.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware, allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
     allow_credentials=False, allow_methods=["GET", "POST", "PATCH", "DELETE"], allow_headers=["*"],
@@ -173,7 +174,7 @@ async def security_headers(request: Request, call_next):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "no-referrer"
-    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(self), geolocation=()"
     if request.url.scheme == "https":
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     return response
@@ -266,6 +267,7 @@ async def create_checkin(user_id: AuthUser, payload: CheckinCreate | None = None
         record, _ = insert_record(
             connection, user_id, kind="checkin", occurred_at=iso(), time_scope="exact",
             energy=data.energy, content=data.note, client_uuid=data.client_uuid,
+            effort_unit=data.effort_unit,
         )
         connection.commit()
         return record
@@ -280,6 +282,7 @@ async def batch_checkins(payload: BatchCheckinCreate, user_id: AuthUser) -> dict
             _, created = insert_record(
                 connection, user_id, kind="checkin", occurred_at=occurred, time_scope="exact",
                 energy=item.energy, content=item.note, client_uuid=item.client_uuid,
+                effort_unit=item.effort_unit,
             )
             accepted += int(created)
             duplicates += int(not created)
@@ -298,6 +301,7 @@ async def create_backfill(payload: BackfillCreate, user_id: AuthUser) -> dict[st
         record, _ = insert_record(
             connection, user_id, kind="backfill", occurred_at=occurred_at, time_scope=scope,
             day_slot=payload.day_slot, energy=payload.energy, content=payload.note,
+            effort_unit=payload.effort_unit,
         )
         connection.commit()
         return record
@@ -328,7 +332,10 @@ async def update_record(record_id: int, payload: RecordUpdate, user_id: AuthUser
             if payload.day else None
         )
         fields["time_scope"] = "exact" if payload.day else "past"
-    for api_name, db_name in (("day_slot", "day_slot"), ("energy", "energy"), ("content", "content")):
+    for api_name, db_name in (
+        ("day_slot", "day_slot"), ("energy", "energy"), ("content", "content"),
+        ("effort_unit", "effort_unit"),
+    ):
         if api_name in payload.model_fields_set:
             fields[db_name] = getattr(payload, api_name)
     if not fields:
@@ -533,7 +540,85 @@ async def delete_lamp(lamp_id: int, user_id: AuthUser) -> None:
 async def get_settings(user_id: AuthUser) -> dict[str, bool]:
     with closing(connect()) as connection:
         row = connection.execute("SELECT * FROM user_settings WHERE user_id=?", (user_id,)).fetchone()
-    return {key: bool(row[key]) for key in ("low_energy_mode", "hide_all_numbers", "nothing_mode", "privacy_mode")}
+        latest_record = connection.execute(
+            "SELECT created_at FROM records WHERE user_id=? ORDER BY created_at DESC LIMIT 1",
+            (user_id,),
+        ).fetchone()
+    preferences = {
+        key: bool(row[key])
+        for key in (
+            "low_energy_mode", "auto_low_energy_mode", "hide_all_numbers",
+            "nothing_mode", "notify_enabled", "weekly_report_opt_out", "privacy_mode",
+        )
+    }
+    auto_active = bool(
+        preferences["auto_low_energy_mode"]
+        and latest_record
+        and parse_iso(latest_record["created_at"]) <= utc_now() - timedelta(days=3)
+    )
+    return {**preferences, "auto_low_energy_active": auto_active}
+
+
+@app.post("/api/v1/reflections/weekly")
+async def weekly_reflection(user_id: AuthUser) -> dict[str, object]:
+    cutoff = iso(utc_now() - timedelta(days=7))
+    with closing(connect()) as connection:
+        settings = connection.execute(
+            "SELECT weekly_report_opt_out FROM user_settings WHERE user_id=?", (user_id,)
+        ).fetchone()
+        if settings["weekly_report_opt_out"]:
+            raise friendly(409, "REFLECTION_DISABLED", "回看已经按你的选择保持安静。")
+        rows = connection.execute(
+            """SELECT occurred_at,day_slot,content FROM records
+               WHERE user_id=? AND COALESCE(occurred_at,created_at)>=?""",
+            (user_id, cutoff),
+        ).fetchall()
+
+    if not rows:
+        return {"period": "past_7_days", "lines": ["过去七天的织痕保持着原来的样子。"]}
+    exact_days = {row["occurred_at"][:10] for row in rows if row["occurred_at"]}
+    lines = [f"过去七天，织痕里新增了 {len(rows)} 根线。"]
+    if exact_days:
+        lines.append(f"这些痕迹分布在 {len(exact_days)} 个日期里。")
+    slot_labels = {"morning": "早上", "afternoon": "下午", "evening": "晚上", "night": "深夜"}
+    slot_counts = {
+        slot: sum(row["day_slot"] == slot for row in rows) for slot in slot_labels
+    }
+    for slot, label in slot_labels.items():
+        if slot_counts[slot]:
+            lines.append(f"其中有 {slot_counts[slot]} 根记录在{label}。")
+    note_count = sum(bool(row["content"]) for row in rows)
+    if note_count:
+        lines.append(f"有 {note_count} 根线带着当时留下的话。")
+    return {"period": "past_7_days", "lines": lines}
+
+
+@app.post("/api/v1/echo")
+async def deliver_echo(user_id: AuthUser) -> dict[str, object]:
+    with closing(connect()) as connection:
+        settings = connection.execute(
+            "SELECT notify_enabled,nothing_mode FROM user_settings WHERE user_id=?", (user_id,)
+        ).fetchone()
+        if not settings["notify_enabled"] or settings["nothing_mode"]:
+            return {"echo": None}
+        latest = connection.execute(
+            "SELECT id,created_at FROM records WHERE user_id=? ORDER BY created_at DESC LIMIT 1",
+            (user_id,),
+        ).fetchone()
+        if not latest or parse_iso(latest["created_at"]) > utc_now() - timedelta(days=14):
+            return {"echo": None}
+        delivered = connection.execute(
+            "SELECT 1 FROM echo_deliveries WHERE user_id=? AND anchor_record_id=?",
+            (user_id, latest["id"]),
+        ).fetchone()
+        if delivered:
+            return {"echo": None}
+        connection.execute(
+            "INSERT INTO echo_deliveries(user_id,anchor_record_id,delivered_at) VALUES(?,?,?)",
+            (user_id, latest["id"], iso()),
+        )
+        connection.commit()
+    return {"echo": {"title": "织痕", "message": "有一段痕迹仍在这里。"}}
 
 
 @app.patch("/api/v1/settings")
@@ -570,7 +655,10 @@ async def export_data(payload: ExportInput, user_id: AuthUser) -> Response:
 @app.post("/api/v1/data/ash")
 async def ash_data(user_id: AuthUser) -> dict[str, str]:
     with closing(connect()) as connection:
-        connection.execute("UPDATE records SET content=NULL,energy=NULL,ash=1 WHERE user_id=?", (user_id,))
+        connection.execute(
+            "UPDATE records SET content=NULL,energy=NULL,effort_unit=NULL,ash=1 WHERE user_id=?",
+            (user_id,),
+        )
         connection.execute("DELETE FROM lamps WHERE user_id=?", (user_id,))
         connection.commit()
     return {"result": "视觉图案保留，文字已经收走。"}

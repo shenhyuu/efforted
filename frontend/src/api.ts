@@ -9,6 +9,7 @@ export interface RecordItem {
   day_slot: DaySlot | null
   energy: Energy | null
   content: string | null
+  effort_unit: string | null
   duration_seconds: number | null
   ash: boolean
   created_at: string
@@ -32,10 +33,15 @@ export interface Lamp {
 }
 export interface Settings {
   low_energy_mode: boolean
+  auto_low_energy_mode: boolean
+  auto_low_energy_active: boolean
   hide_all_numbers: boolean
   nothing_mode: boolean
+  notify_enabled: boolean
+  weekly_report_opt_out: boolean
   privacy_mode: boolean
 }
+export type SettingsUpdate = Partial<Omit<Settings, 'auto_low_energy_active'>>
 export interface WeaveThread { energy: Energy | null; count: number }
 export interface WeaveData {
   days: Array<{ day: string; threads: WeaveThread[] }>
@@ -51,6 +57,7 @@ interface QueuedCheckin {
   client_created_at: string
   energy?: Energy
   note?: string
+  effort_unit?: string
 }
 
 class ApiResponseError extends Error {}
@@ -146,6 +153,7 @@ export async function offlineQueuedRecords(): Promise<RecordItem[]> {
     id: -Math.abs(hashId(item.client_uuid)), occurred_at: item.client_created_at,
     time_scope: 'exact', time_label: null, day_slot: null, energy: item.energy || null,
     content: item.note || null, duration_seconds: null, ash: false,
+    effort_unit: item.effort_unit || null,
     created_at: item.client_created_at, pending: true,
   }))
 }
@@ -174,7 +182,7 @@ export const api = {
     return items
   },
   weave: () => request<WeaveData>('/weave'),
-  async checkin(input: { energy?: Energy; note?: string; client_uuid: string }) {
+  async checkin(input: { energy?: Energy; note?: string; effort_unit?: string; client_uuid: string }) {
     try {
       return await request<RecordItem>('/checkins', { method: 'POST', body: JSON.stringify(input) })
     } catch (error) {
@@ -184,7 +192,7 @@ export const api = {
       return (await offlineQueuedRecords()).find((item) => item.occurred_at === createdAt) as RecordItem
     }
   },
-  backfill: (input: { day?: string; day_slot?: DaySlot; energy?: Energy; note?: string }) =>
+  backfill: (input: { day?: string; day_slot?: DaySlot; energy?: Energy; note?: string; effort_unit?: string }) =>
     request<RecordItem>('/records/backfill', { method: 'POST', body: JSON.stringify(input) }),
   deleteRecord: (id: number) => request<void>(`/records/${id}`, { method: 'DELETE' }),
   comeback: () => request<{ is_comeback: boolean; card?: { message: string } }>('/comeback'),
@@ -198,7 +206,9 @@ export const api = {
   openLamp: (id: number) => request<Lamp>(`/lamps/${id}/open`, { method: 'POST' }),
   deleteLamp: (id: number) => request<void>(`/lamps/${id}`, { method: 'DELETE' }),
   settings: () => request<Settings>('/settings'),
-  updateSettings: (input: Partial<Settings>) => request<Settings>('/settings', { method: 'PATCH', body: JSON.stringify(input) }),
+  updateSettings: (input: SettingsUpdate) => request<Settings>('/settings', { method: 'PATCH', body: JSON.stringify(input) }),
+  weeklyReflection: () => request<{ period: string; lines: string[] }>('/reflections/weekly', { method: 'POST' }),
+  echo: () => request<{ echo: { title: string; message: string } | null }>('/echo', { method: 'POST' }),
   ash: () => request<{ result: string }>('/data/ash', { method: 'POST' }),
   purgeStatus: () => request<{ pending: boolean; grace_until: string | null }>('/data/purge'),
   requestPurge: () => request<{ grace_until: string }>('/data/purge', { method: 'POST', body: JSON.stringify({ confirm: true }) }),

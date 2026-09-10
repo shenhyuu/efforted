@@ -8,6 +8,7 @@ const router = createRouter({
     { path: '/backfill', name: 'backfill', component: () => import('@/views/BackfillView.vue') },
     { path: '/timer', name: 'timer', component: () => import('@/views/TimerView.vue') },
     { path: '/lamps', name: 'lamps', component: () => import('@/views/LampsView.vue') },
+    { path: '/review', name: 'review', component: () => import('@/views/ReviewView.vue') },
     { path: '/settings', name: 'settings', component: () => import('@/views/SettingsView.vue') },
   ],
 })

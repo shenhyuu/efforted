@@ -10,7 +10,10 @@ async function enter(page: Page) {
   const sessionToken = (await response.json()).token
   await page.request.patch('/api/v1/settings', {
     headers: { Authorization: `Bearer ${sessionToken}` },
-    data: { low_energy_mode: false, hide_all_numbers: false, nothing_mode: false },
+    data: {
+      low_energy_mode: false, auto_low_energy_mode: false, hide_all_numbers: false,
+      nothing_mode: false, notify_enabled: false, weekly_report_opt_out: false,
+    },
   })
   const active = await page.request.get('/api/v1/timers/active', {
     headers: { Authorization: `Bearer ${sessionToken}` },
@@ -62,4 +65,16 @@ test('S6: data controls and professional help remain reachable', async ({ page }
   await expect(page.getByRole('button', { name: '导出 JSON' })).toBeVisible()
   await expect(page.getByRole('button', { name: '清空全部数据' })).toBeVisible()
   await expect(page.getByRole('heading', { name: '如果你需要真正的帮助' })).toBeVisible()
+})
+
+test('P1: a named effort can be kept and weekly reflection stays user-initiated', async ({ page }) => {
+  await page.goto('/')
+  await page.getByRole('button', { name: '读一页' }).click()
+  await page.getByRole('button', { name: '我在 留下一根线' }).click()
+  await expect(page.getByText('读一页', { exact: false }).last()).toBeVisible()
+
+  await page.goto('/review')
+  await expect(page.getByText('过去七天，织痕里新增了', { exact: false })).toHaveCount(0)
+  await page.getByRole('button', { name: '整理过去七天' }).click()
+  await expect(page.getByText('过去七天，织痕里新增了', { exact: false })).toBeVisible()
 })
