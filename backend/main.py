@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import sqlite3
 from contextlib import asynccontextmanager, closing
 from datetime import datetime, time, timedelta, timezone
 from typing import Annotated, Literal
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -64,6 +65,31 @@ def execute_due_purge(connection: sqlite3.Connection, user_id: int) -> bool:
     return True
 
 
+def execute_all_due_purges() -> int:
+    """Physically remove data whose grace period elapsed, even without a user request."""
+    with closing(connect()) as connection:
+        user_ids = [
+            int(row["user_id"])
+            for row in connection.execute(
+                "SELECT user_id FROM purge_requests WHERE execute_at<=?", (iso(),)
+            ).fetchall()
+        ]
+        return sum(execute_due_purge(connection, user_id) for user_id in user_ids)
+
+
+async def purge_worker(stop: asyncio.Event) -> None:
+    while not stop.is_set():
+        try:
+            await asyncio.to_thread(execute_all_due_purges)
+        except sqlite3.Error:
+            # A transient database lock must not permanently stop expiry processing.
+            pass
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=30)
+        except TimeoutError:
+            pass
+
+
 def current_user(authorization: Annotated[str | None, Header()] = None) -> int:
     if not authorization or not authorization.startswith("Bearer "):
         raise friendly(401, "UNAUTHORIZED", "这次访问需要先确认是你。")
@@ -72,7 +98,11 @@ def current_user(authorization: Annotated[str | None, Header()] = None) -> int:
         session = connection.execute(
             "SELECT user_id,expires_at FROM sessions WHERE token_hash=?", (digest,)
         ).fetchone()
-        if not session or parse_iso(session["expires_at"]) <= utc_now():
+        if not session:
+            raise friendly(401, "UNAUTHORIZED", "这次访问已经安静地结束了，可以重新进入。")
+        if parse_iso(session["expires_at"]) <= utc_now():
+            connection.execute("DELETE FROM sessions WHERE token_hash=?", (digest,))
+            connection.commit()
             raise friendly(401, "UNAUTHORIZED", "这次访问已经安静地结束了，可以重新进入。")
         execute_due_purge(connection, session["user_id"])
         return int(session["user_id"])
@@ -121,7 +151,13 @@ def timer_payload(row: sqlite3.Row) -> dict[str, object]:
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     initialize_database()
-    yield
+    stop = asyncio.Event()
+    task = asyncio.create_task(purge_worker(stop))
+    try:
+        yield
+    finally:
+        stop.set()
+        await task
 
 
 app = FastAPI(title="织痕 API", description="记录出现过的时刻，不评价它们。", version="1.0.0", lifespan=lifespan)
@@ -129,6 +165,18 @@ app.add_middleware(
     CORSMiddleware, allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
     allow_credentials=False, allow_methods=["GET", "POST", "PATCH", "DELETE"], allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    if request.url.scheme == "https":
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return response
 
 
 @app.get("/")
@@ -178,11 +226,26 @@ async def setup(payload: PasswordInput) -> dict[str, str]:
 
 
 @app.post("/api/v1/auth/login")
-async def login(payload: PasswordInput) -> dict[str, str]:
+async def login(payload: PasswordInput, request: Request) -> dict[str, str]:
+    address = request.client.host if request.client else "unknown"
+    cutoff = iso(utc_now() - timedelta(minutes=15))
     with closing(connect()) as connection:
+        connection.execute("DELETE FROM login_attempts WHERE attempted_at<?", (cutoff,))
+        failures = connection.execute(
+            "SELECT count(*) count FROM login_attempts WHERE address=? AND attempted_at>=?",
+            (address, cutoff),
+        ).fetchone()["count"]
+        if failures >= 8:
+            connection.commit()
+            raise friendly(429, "TOO_MANY_ATTEMPTS", "这里暂时锁了一会儿，可以稍后再试。")
         user = connection.execute("SELECT * FROM users WHERE username='me'").fetchone()
         if not user or not verify_password(payload.password, user["password_hash"], user["password_salt"]):
+            connection.execute(
+                "INSERT INTO login_attempts(address,attempted_at) VALUES(?,?)", (address, iso())
+            )
+            connection.commit()
             raise friendly(401, "WRONG_PASSWORD", "这个密码没对上，可以再试一次，也可以先休息一会儿。")
+        connection.execute("DELETE FROM login_attempts WHERE address=?", (address,))
         result = issue_session(connection, user["id"])
         connection.commit()
         return result
@@ -213,7 +276,7 @@ async def batch_checkins(payload: BatchCheckinCreate, user_id: AuthUser) -> dict
     accepted = duplicates = 0
     with closing(connect()) as connection:
         for item in payload.items:
-            occurred = item.client_created_at or iso()
+            occurred = iso(item.client_created_at) if item.client_created_at else iso()
             _, created = insert_record(
                 connection, user_id, kind="checkin", occurred_at=occurred, time_scope="exact",
                 energy=item.energy, content=item.note, client_uuid=item.client_uuid,
@@ -241,14 +304,19 @@ async def create_backfill(payload: BackfillCreate, user_id: AuthUser) -> dict[st
 
 
 @app.get("/api/v1/records")
-async def list_records(user_id: AuthUser, limit: Annotated[int, Query(ge=1, le=200)] = 100) -> dict[str, object]:
+async def list_records(
+    user_id: AuthUser,
+    limit: Annotated[int, Query(ge=1, le=200)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> dict[str, object]:
     with closing(connect()) as connection:
         rows = connection.execute(
             """SELECT * FROM records WHERE user_id=?
                ORDER BY CASE WHEN time_scope='exact' THEN 0 ELSE 1 END,
-                        occurred_at DESC,created_at DESC LIMIT ?""", (user_id, limit)
+                         occurred_at DESC,created_at DESC LIMIT ? OFFSET ?""", (user_id, limit, offset)
         ).fetchall()
-    return {"items": [row_record(row) for row in rows], "next_cursor": None}
+    next_cursor = offset + len(rows) if len(rows) == limit else None
+    return {"items": [row_record(row) for row in rows], "next_cursor": next_cursor}
 
 
 @app.patch("/api/v1/records/{record_id}")

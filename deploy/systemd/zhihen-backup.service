@@ -1,0 +1,8 @@
+[Unit]
+Description=Back up ZhiHen SQLite data
+
+[Service]
+Type=oneshot
+User=zhihen
+Group=zhihen
+ExecStart=/bin/bash /opt/zhihen/deploy/backup.sh

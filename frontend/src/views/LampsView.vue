@@ -3,9 +3,13 @@ import { onMounted, ref } from 'vue'
 import { api, type Energy, type Lamp } from '@/api'
 
 const lamps = ref<Lamp[]>([]), message = ref(''), energy = ref<Energy | undefined>(), opened = ref<Lamp | null>(null), note = ref('')
-async function load() { lamps.value = (await api.lamps()).lamps }
-async function create() { if (!message.value.trim()) return; const lamp = await api.createLamp(message.value.trim(), energy.value); lamps.value.unshift(lamp); message.value = ''; energy.value = undefined; note.value = '这盏灯留在这里了。' }
-async function open(lamp: Lamp) { opened.value = await api.openLamp(lamp.id) }
+async function load() { try { lamps.value = (await api.lamps()).lamps } catch (reason) { note.value = reason instanceof Error ? reason.message : '灯暂时没有回应。' } }
+async function create() {
+  if (!message.value.trim()) return
+  try { const lamp = await api.createLamp(message.value.trim(), energy.value); lamps.value.unshift(lamp); message.value = ''; energy.value = undefined; note.value = '这盏灯留在这里了。' }
+  catch (reason) { note.value = reason instanceof Error ? reason.message : '这盏灯暂时没有被收好。' }
+}
+async function open(lamp: Lamp) { try { opened.value = await api.openLamp(lamp.id) } catch (reason) { note.value = reason instanceof Error ? reason.message : '这盏灯暂时没有回应。' } }
 onMounted(load)
 </script>
 

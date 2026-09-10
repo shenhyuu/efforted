@@ -4,5 +4,8 @@ backend/data/
 backend/__pycache__/
 frontend/node_modules/
 frontend/dist/
+frontend/test-results/
+frontend/playwright-report/
+.corepack/
 frontend/.idea/
 *.pyc

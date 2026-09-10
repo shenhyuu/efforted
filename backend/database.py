@@ -77,6 +77,8 @@ def initialize_database() -> None:
                 closed_at TEXT
             );
             CREATE INDEX IF NOT EXISTS idx_timers_user ON timers(user_id, status);
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_one_active_timer
+                ON timers(user_id) WHERE status != 'closed';
 
             CREATE TABLE IF NOT EXISTS timer_segments (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -108,6 +110,14 @@ def initialize_database() -> None:
                 requested_at TEXT NOT NULL,
                 execute_at TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS login_attempts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                address TEXT NOT NULL,
+                attempted_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_login_attempts_address_time
+                ON login_attempts(address, attempted_at);
             """
         )
         connection.commit()

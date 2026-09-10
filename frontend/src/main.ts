@@ -4,6 +4,7 @@ import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 
 import App from './App.vue'
+import { flushOfflineCheckins } from './api'
 import router from './router'
 
 const app = createApp(App)
@@ -16,3 +17,5 @@ app.mount('#app')
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
   navigator.serviceWorker.register('/sw.js')
 }
+
+window.addEventListener('online', () => { void flushOfflineCheckins().catch(() => undefined) })

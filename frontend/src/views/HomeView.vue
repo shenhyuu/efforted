@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { api, type Energy, type RecordItem } from '@/api'
+import type { WeaveData } from '@/api'
+import WeaveCanvas from '@/components/WeaveCanvas.vue'
 import { useRecordsStore } from '@/stores/records'
 import { useSettingsStore } from '@/stores/settings'
 
@@ -11,6 +13,8 @@ const note = ref('')
 const noteOpen = ref(false)
 const settled = ref(false)
 const comebackMessage = ref('')
+const weave = ref<WeaveData | null>(null)
+const weaveAnimation = ref(0)
 const energyOptions: Array<{ value: Energy; label: string }> = [
   { value: 'low', label: '低' }, { value: 'mid', label: '中' }, { value: 'enough', label: '够用' },
 ]
@@ -41,13 +45,18 @@ async function leaveTrace() {
     noteOpen.value = false
     settled.value = true
     window.setTimeout(() => (settled.value = false), 2600)
+    if (!result.pending) {
+      const refreshed = await api.weave().catch(() => null)
+      if (refreshed) { weave.value = refreshed; weaveAnimation.value++ }
+    }
   }
 }
 
 onMounted(async () => {
   await store.load()
+  weave.value = await api.weave().catch(() => null)
   if (!settings.values.nothing_mode) {
-    const result = await api.comeback()
+    const result: { is_comeback: boolean; card?: { message: string } } = await api.comeback().catch(() => ({ is_comeback: false }))
     if (result.is_comeback) comebackMessage.value = result.card?.message || '你回来了。'
   }
 })
@@ -100,13 +109,14 @@ onMounted(async () => {
         <div class="empty-lines" aria-hidden="true"><i></i><i></i><i></i></div>
         <p>这里还很空，也很好。</p><span>留白也是生命的一部分。</span>
       </div>
-      <ol v-else class="thread-list">
+      <WeaveCanvas v-if="weave" :weave="weave" :animate-key="weaveAnimation" />
+      <ol v-if="store.hasRecords" class="thread-list compact-thread-list">
         <li v-for="(record, index) in visibleRecords" :key="record.id"
           :class="['thread-row', `thread-${record.energy || 'plain'}`, { fresh: store.lastAddedId === record.id }]"
           :style="{ '--thread-index': index }">
           <time>{{ recordDate(record) }}</time>
           <div class="thread" aria-hidden="true"><i></i><i></i></div>
-          <span class="record-note">{{ record.content || '在这里' }}</span>
+          <span class="record-note">{{ record.content || '在这里' }}<small v-if="record.pending"> · 等待同步</small></span>
           <span v-if="energyLabel(record.energy)" class="record-energy">{{ energyLabel(record.energy) }}</span>
         </li>
       </ol>

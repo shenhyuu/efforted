@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 Energy = Literal["low", "mid", "enough"]
 DaySlot = Literal["morning", "afternoon", "evening", "night"]
@@ -21,7 +21,19 @@ class CheckinCreate(BaseModel):
 
 
 class BatchCheckinItem(CheckinCreate):
-    client_created_at: str | None = None
+    client_created_at: datetime | None = None
+
+    @field_validator("client_created_at")
+    @classmethod
+    def validate_client_created_at(cls, value: datetime | None) -> datetime | None:
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            raise ValueError("client_created_at must include a timezone")
+        normalized = value.astimezone(timezone.utc)
+        if normalized > datetime.now(timezone.utc) + timedelta(minutes=5):
+            raise ValueError("client_created_at cannot be in the future")
+        return normalized
 
 
 class BatchCheckinCreate(BaseModel):

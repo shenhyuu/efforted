@@ -8,22 +8,30 @@ const settings = useSettingsStore(), router = useRouter()
 const purge = ref<{ pending: boolean; grace_until: string | null }>({ pending: false, grace_until: null })
 const help = ref<{ note: string; resources: Array<{ name: string; phone: string }> } | null>(null)
 const note = ref('')
-onMounted(async () => { await settings.load(); purge.value = await api.purgeStatus(); help.value = await api.help() })
+const busy = ref(false)
+async function perform(action: () => Promise<void>) {
+  if (busy.value) return
+  busy.value = true; note.value = ''
+  try { await action() }
+  catch (reason) { note.value = reason instanceof Error ? reason.message : '这里暂时没有回应。' }
+  finally { busy.value = false }
+}
+onMounted(async () => { await settings.load(); await perform(async () => { purge.value = await api.purgeStatus(); help.value = await api.help() }) })
 async function toggle(key: keyof typeof settings.values) {
-  await settings.update({ [key]: !settings.values[key] })
-  if (key === 'low_energy_mode' && settings.values.low_energy_mode) await router.push('/')
+  const updated = await settings.update({ [key]: !settings.values[key] })
+  if (updated && key === 'low_energy_mode' && settings.values.low_energy_mode) await router.push('/')
 }
 async function makeAsh() {
   if (!window.confirm('文字与灯会被立即物理删除，织痕图案仍会留下。确认继续吗？')) return
-  note.value = (await api.ash()).result
+  await perform(async () => { note.value = (await api.ash()).result })
 }
 async function requestPurge() {
   if (!window.confirm('全部记录将在 48 小时后被物理删除。宽限期内可以撤销。确认继续吗？')) return
-  const result = await api.requestPurge(); purge.value = { pending: true, grace_until: result.grace_until }
+  await perform(async () => { const result = await api.requestPurge(); purge.value = { pending: true, grace_until: result.grace_until } })
 }
-async function cancelPurge() { await api.cancelPurge(); purge.value = { pending: false, grace_until: null }; note.value = '清空请求已经撤销。' }
+async function cancelPurge() { await perform(async () => { await api.cancelPurge(); purge.value = { pending: false, grace_until: null }; note.value = '清空请求已经撤销。' }) }
 async function exportPng() {
-  const records = (await api.getRecords()).items
+  const records = await api.getAllRecords()
   const canvas = document.createElement('canvas'), width = 1200, row = 18
   canvas.width = width; canvas.height = Math.max(720, records.length * row + 260)
   const context = canvas.getContext('2d'); if (!context) return
@@ -53,5 +61,5 @@ async function exportPng() {
     <button v-else class="purge-button" type="button" @click="requestPurge">清空全部数据</button>
   </div>
   <div v-if="help" class="help-card"><h2>如果你需要真正的帮助</h2><p>{{ help.note }}</p><a v-for="resource in help.resources" :key="resource.phone" :href="`tel:${resource.phone}`">{{ resource.name }} · {{ resource.phone }}</a></div>
-  <p class="form-message">{{ note }}</p>
+  <p class="form-message">{{ note || settings.error }}</p>
 </section></main></template>

@@ -1,6 +1,6 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
-import { api, flushOfflineCheckins, type Energy, type RecordItem } from '@/api'
+import { api, flushOfflineCheckins, offlineQueuedRecords, type Energy, type RecordItem } from '@/api'
 
 export const useRecordsStore = defineStore('records', () => {
   const records = ref<RecordItem[]>([])
@@ -9,8 +9,14 @@ export const useRecordsStore = defineStore('records', () => {
   const hasRecords = computed(() => records.value.length > 0)
   async function load() {
     loading.value = true; error.value = null
-    try { await flushOfflineCheckins(); records.value = (await api.getRecords()).items }
-    catch (reason) { error.value = reason instanceof Error ? reason.message : '这里暂时没有回应。' }
+    const pending = await offlineQueuedRecords().catch(() => [])
+    try {
+      await flushOfflineCheckins()
+      records.value = await api.getAllRecords()
+    } catch (reason) {
+      records.value = pending
+      if (!pending.length) error.value = reason instanceof Error ? reason.message : '这里暂时没有回应。'
+    }
     finally { loading.value = false }
   }
   async function checkin(input: { energy?: Energy; note?: string }) {

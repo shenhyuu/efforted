@@ -66,6 +66,10 @@ h1 { margin: 12px 0 13px; font-size: clamp(34px, 4vw, 47px); letter-spacing: 0.0
 .empty-lines i:nth-child(2) { transform: translateX(19px); } .empty-lines i:nth-child(3) { transform: translateX(-12px); }
 .thread-list { list-style: none; margin: 28px 0 0; padding: 0; }
 .thread-row { --thread-color: #998f83; display: grid; grid-template-columns: 52px minmax(90px,1fr) minmax(72px,.72fr) 36px; align-items: center; gap: 13px; min-height: 36px; opacity: calc(1 - var(--thread-index) * .035); }
+.weave-canvas-wrap { position: relative; height: 330px; margin: 24px 0 10px; overflow: hidden; border-radius: 14px; background: linear-gradient(135deg, rgba(255,255,255,.17), rgba(128,100,78,.035)); }
+.weave-canvas { width: 100%; height: 100%; display: block; }
+.compact-thread-list { max-height: 190px; overflow: auto; padding-right: 6px; border-top: 1px solid var(--line); padding-top: 12px; }
+.record-note small { color: var(--ink-faint); font-size: 10px; }
 .thread-row time, .record-energy { color: var(--ink-faint); font-size: 10px; }
 .thread-low { --thread-color: var(--low); } .thread-mid { --thread-color: var(--mid); } .thread-enough { --thread-color: var(--enough); }
 .thread { position: relative; height: 12px; }
@@ -155,6 +159,13 @@ h1 { margin: 12px 0 13px; font-size: clamp(34px, 4vw, 47px); letter-spacing: 0.0
 .purge-pending { margin-top: 20px; padding: 16px; border-radius: 14px; background: rgba(139,98,89,.08); }
 .help-card p { color: var(--ink-soft); line-height: 1.8; }.help-card a { display: block; width: fit-content; margin-top: 10px; border-bottom: 1px solid var(--line); }
 .lite-shell { width: min(100% - 28px,540px); }.lite-home { display: block; }.lite-home .presence-card { min-height: 70vh; justify-content: center; }.lite-home .presence-button { width: 194px; height: 194px; }
+
+@media (prefers-color-scheme: dark) {
+  .presence-card, .weave-card, .auth-card, .form-card, .timer-card, .lamp-card { background: rgba(37, 33, 29, .82); box-shadow: 0 18px 50px rgba(0,0,0,.22); }
+  .energy-choice, .lamp-item { background: rgba(255,255,255,.045); }
+  input, textarea { background: #211e1a; color: var(--ink); }
+  .presence-button { background: linear-gradient(145deg, #85694f, #594739); }
+}
 
 @media (max-width: 720px) {
   .site-header { align-items: flex-start; }.site-header nav { max-width: 250px; justify-content: flex-end; flex-wrap: wrap; }

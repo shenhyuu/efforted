@@ -36,9 +36,24 @@ export interface Settings {
   nothing_mode: boolean
   privacy_mode: boolean
 }
+export interface WeaveThread { energy: Energy | null; count: number }
+export interface WeaveData {
+  days: Array<{ day: string; threads: WeaveThread[] }>
+  past: { label: string; threads: WeaveThread[] }
+  ember: { temperature: number }
+}
 
 const TOKEN_KEY = 'zhihen_token'
-const QUEUE_KEY = 'zhihen_offline_checkins'
+const QUEUE_DB = 'zhihen-offline'
+const QUEUE_STORE = 'checkins'
+interface QueuedCheckin {
+  client_uuid: string
+  client_created_at: string
+  energy?: Energy
+  note?: string
+}
+
+class ApiResponseError extends Error {}
 export const token = {
   get: () => localStorage.getItem(TOKEN_KEY),
   set: (value: string) => localStorage.setItem(TOKEN_KEY, value),
@@ -65,23 +80,80 @@ async function request<T>(path: string, options: RequestInit = {}, authenticated
   if (!response.ok) {
     let payload: unknown = null
     try { payload = await response.json() } catch { /* response has no JSON body */ }
-    throw new Error(errorMessage(payload))
+    throw new ApiResponseError(errorMessage(payload))
   }
   if (response.status === 204) return undefined as T
   return response.json() as Promise<T>
 }
 
-function queuedItems(): Array<Record<string, unknown>> {
-  try { return JSON.parse(localStorage.getItem(QUEUE_KEY) || '[]') as Array<Record<string, unknown>> }
-  catch { return [] }
+function queueDatabase(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const open = indexedDB.open(QUEUE_DB, 1)
+    open.onupgradeneeded = () => {
+      if (!open.result.objectStoreNames.contains(QUEUE_STORE)) {
+        open.result.createObjectStore(QUEUE_STORE, { keyPath: 'client_uuid' })
+      }
+    }
+    open.onsuccess = () => resolve(open.result)
+    open.onerror = () => reject(open.error)
+  })
+}
+
+async function queuedItems(): Promise<QueuedCheckin[]> {
+  const database = await queueDatabase()
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction(QUEUE_STORE, 'readonly')
+    const request = transaction.objectStore(QUEUE_STORE).getAll()
+    request.onsuccess = () => resolve(request.result as QueuedCheckin[])
+    request.onerror = () => reject(request.error)
+    transaction.oncomplete = () => database.close()
+  })
+}
+
+async function enqueue(item: QueuedCheckin): Promise<void> {
+  const database = await queueDatabase()
+  await new Promise<void>((resolve, reject) => {
+    const transaction = database.transaction(QUEUE_STORE, 'readwrite')
+    transaction.objectStore(QUEUE_STORE).put(item)
+    transaction.oncomplete = () => resolve()
+    transaction.onerror = () => reject(transaction.error)
+  })
+  database.close()
+}
+
+async function removeQueued(ids: string[]): Promise<void> {
+  const database = await queueDatabase()
+  await new Promise<void>((resolve, reject) => {
+    const transaction = database.transaction(QUEUE_STORE, 'readwrite')
+    const store = transaction.objectStore(QUEUE_STORE)
+    ids.forEach((id) => store.delete(id))
+    transaction.oncomplete = () => resolve()
+    transaction.onerror = () => reject(transaction.error)
+  })
+  database.close()
 }
 
 export async function flushOfflineCheckins() {
-  const items = queuedItems()
+  const items = await queuedItems()
   if (!items.length || !token.get()) return 0
   await request('/checkins/batch', { method: 'POST', body: JSON.stringify({ items }) })
-  localStorage.removeItem(QUEUE_KEY)
+  await removeQueued(items.map((item) => item.client_uuid))
   return items.length
+}
+
+export async function offlineQueuedRecords(): Promise<RecordItem[]> {
+  return (await queuedItems()).map((item) => ({
+    id: -Math.abs(hashId(item.client_uuid)), occurred_at: item.client_created_at,
+    time_scope: 'exact', time_label: null, day_slot: null, energy: item.energy || null,
+    content: item.note || null, duration_seconds: null, ash: false,
+    created_at: item.client_created_at, pending: true,
+  }))
+}
+
+function hashId(value: string) {
+  let hash = 0
+  for (let index = 0; index < value.length; index++) hash = ((hash << 5) - hash + value.charCodeAt(index)) | 0
+  return hash || 1
 }
 
 export const api = {
@@ -89,19 +161,27 @@ export const api = {
   setup: (password: string) => request<{ token: string }>('/auth/setup', { method: 'POST', body: JSON.stringify({ password }) }, false),
   login: (password: string) => request<{ token: string }>('/auth/login', { method: 'POST', body: JSON.stringify({ password }) }, false),
   logout: () => request<void>('/auth/logout', { method: 'POST' }),
-  getRecords: () => request<{ items: RecordItem[] }>('/records'),
+  getRecords: (offset = 0) => request<{ items: RecordItem[]; next_cursor: number | null }>(`/records?limit=200&offset=${offset}`),
+  async getAllRecords() {
+    const items: RecordItem[] = []
+    let offset = 0
+    do {
+      const page = await request<{ items: RecordItem[]; next_cursor: number | null }>(`/records?limit=200&offset=${offset}`)
+      items.push(...page.items)
+      if (page.next_cursor === null) break
+      offset = page.next_cursor
+    } while (true)
+    return items
+  },
+  weave: () => request<WeaveData>('/weave'),
   async checkin(input: { energy?: Energy; note?: string; client_uuid: string }) {
     try {
       return await request<RecordItem>('/checkins', { method: 'POST', body: JSON.stringify(input) })
     } catch (error) {
-      if (navigator.onLine) throw error
+      if (error instanceof ApiResponseError) throw error
       const createdAt = new Date().toISOString()
-      const queue = queuedItems()
-      queue.push({ ...input, client_created_at: createdAt })
-      localStorage.setItem(QUEUE_KEY, JSON.stringify(queue))
-      return { id: -Date.now(), occurred_at: createdAt, time_scope: 'exact', time_label: null,
-        day_slot: null, energy: input.energy || null, content: input.note || null,
-        duration_seconds: null, ash: false, created_at: createdAt, pending: true } as RecordItem
+      await enqueue({ ...input, client_created_at: createdAt })
+      return (await offlineQueuedRecords()).find((item) => item.occurred_at === createdAt) as RecordItem
     }
   },
   backfill: (input: { day?: string; day_slot?: DaySlot; energy?: Energy; note?: string }) =>

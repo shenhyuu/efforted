@@ -1,0 +1,20 @@
+[Unit]
+Description=ZhiHen API
+After=network.target
+
+[Service]
+Type=simple
+User=zhihen
+Group=zhihen
+WorkingDirectory=/opt/zhihen/backend
+Environment=ZHIHEN_DB_PATH=/var/lib/zhihen/zhihen.db
+ExecStart=/opt/zhihen/backend/.venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 8000
+Restart=on-failure
+RestartSec=3
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/zhihen
+
+[Install]
+WantedBy=multi-user.target
