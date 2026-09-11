@@ -17,11 +17,13 @@ const slots: Array<{ value: DaySlot; label: string }> = [
 async function save() {
   busy.value = true
   try {
-    await api.backfill({
+    const result = await api.backfill({
       day: day.value || undefined, day_slot: daySlot.value, energy: energy.value,
       note: note.value || undefined, effort_unit: effortUnit.value,
     })
-    message.value = day.value ? '那一天已经收好了。' : '这段过去已经收好了。'
+    message.value = result.pending
+      ? '这段过去会在恢复联结后收好。'
+      : day.value ? '那一天已经收好了。' : '这段过去已经收好了。'
     window.setTimeout(() => router.push('/'), 900)
   } catch (reason) { message.value = reason instanceof Error ? reason.message : '这段过去暂时没有被收好。' }
   finally { busy.value = false }

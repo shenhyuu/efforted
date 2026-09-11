@@ -4,6 +4,7 @@ import { api, type TimerState } from '@/api'
 import { useSettingsStore } from '@/stores/settings'
 
 const timer = ref<TimerState | null>(null), localSeconds = ref(0), message = ref(''), busy = ref(false)
+const stops = ref<Array<{ stopped_at: string; elapsed_seconds: number }>>([])
 const settings = useSettingsStore()
 const numbersVisible = ref(false)
 const snapshotKey = 'zhihen_timer_snapshot'
@@ -38,11 +39,18 @@ async function perform(action: () => Promise<void>) {
   catch (reason) { message.value = reason instanceof Error ? reason.message : '这段计时暂时没有回应。' }
   finally { busy.value = false }
 }
-async function load() { restoreSnapshot(); await perform(async () => { timer.value = await api.activeTimer(); localSeconds.value = timer.value?.elapsed_seconds || 0; persistSnapshot(); syncTicker() }) }
-async function start() { await perform(async () => { timer.value = await api.startTimer(); localSeconds.value = timer.value.elapsed_seconds; persistSnapshot(); syncTicker() }) }
-async function pause() { if (!timer.value) return; await perform(async () => { timer.value = await api.pauseTimer(timer.value!.id); localSeconds.value = timer.value.elapsed_seconds; message.value = timer.value.break_card?.message || ''; persistSnapshot(); syncTicker() }) }
+async function loadStops() {
+  stops.value = timer.value ? (await api.timerSegments(timer.value.id)).stops : []
+}
+function stopText(stop: { stopped_at: string; elapsed_seconds: number }) {
+  const anchor = new Date(stop.stopped_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })
+  return `${anchor}，那时走了 ${Math.max(1, Math.floor(stop.elapsed_seconds / 60))} 分钟。`
+}
+async function load() { restoreSnapshot(); await perform(async () => { timer.value = await api.activeTimer(); localSeconds.value = timer.value?.elapsed_seconds || 0; await loadStops(); persistSnapshot(); syncTicker() }) }
+async function start() { await perform(async () => { timer.value = await api.startTimer(); localSeconds.value = timer.value.elapsed_seconds; await loadStops(); persistSnapshot(); syncTicker() }) }
+async function pause() { if (!timer.value) return; await perform(async () => { timer.value = await api.pauseTimer(timer.value!.id); localSeconds.value = timer.value.elapsed_seconds; message.value = timer.value.break_card?.message || ''; await loadStops(); persistSnapshot(); syncTicker() }) }
 async function resume() { if (!timer.value) return; await perform(async () => { timer.value = await api.resumeTimer(timer.value!.id); message.value = '你回来了。'; persistSnapshot(); syncTicker() }) }
-async function close() { if (!timer.value) return; await perform(async () => { const result = await api.closeTimer(timer.value!.id); localSeconds.value = result.total_seconds; timer.value = null; persistSnapshot(); message.value = '今天就到这里。'; syncTicker() }) }
+async function close() { if (!timer.value) return; await perform(async () => { const result = await api.closeTimer(timer.value!.id); localSeconds.value = result.total_seconds; timer.value = null; stops.value = []; persistSnapshot(); message.value = '今天就到这里。'; syncTicker() }) }
 onMounted(load); onBeforeUnmount(() => { persistSnapshot(); if (ticker) window.clearInterval(ticker) })
 </script>
 
@@ -62,5 +70,9 @@ onMounted(load); onBeforeUnmount(() => { persistSnapshot(); if (ticker) window.c
     <button v-else class="primary-action" type="button" :disabled="busy" @click="resume">我回来了</button>
     <button class="secondary-action" type="button" :disabled="busy" @click="close">今天就到这里</button></template>
   </div><p class="form-message">{{ message }}</p>
+  <details v-if="stops.length && !settings.values.hide_all_numbers" class="timer-history">
+    <summary>你停下的地方</summary>
+    <ol><li v-for="stop in stops" :key="stop.stopped_at"><time>{{ stopText(stop) }}</time></li></ol>
+  </details>
   <div class="timer-principles" aria-label="计时说明"><span>可以暂停</span><i></i><span>不设目标</span><i></i><span>走过的都算数</span></div>
 </section></main></template>

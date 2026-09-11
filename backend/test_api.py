@@ -124,6 +124,42 @@ def test_custom_effort_unit_is_stored_without_aggregation(client: TestClient):
     assert listed[0]["effort_unit"] == "打开了文档"
 
 
+def test_effort_units_are_distinct_and_have_no_counts(client: TestClient):
+    headers = setup_headers(client)
+    for value in ("打开了文档", "读了一段", "打开了文档"):
+        client.post("/api/v1/checkins", headers=headers, json={"effort_unit": value})
+    result = client.get("/api/v1/effort-units", headers=headers).json()
+    assert result == {"items": ["打开了文档", "读了一段"]}
+
+
+def test_timer_stop_history_is_read_only_and_uses_elapsed_time(client: TestClient):
+    headers = setup_headers(client)
+    timer_id = client.post("/api/v1/timers", headers=headers).json()["id"]
+    with database.connect() as connection:
+        connection.execute(
+            "UPDATE timer_segments SET started_at=? WHERE timer_id=?",
+            (iso(utc_now() - timedelta(minutes=23)), timer_id),
+        )
+        connection.commit()
+    client.post(f"/api/v1/timers/{timer_id}/pause", headers=headers)
+    history = client.get(f"/api/v1/timers/{timer_id}/segments", headers=headers).json()
+    assert len(history["stops"]) == 1
+    assert history["stops"][0]["elapsed_seconds"] >= 23 * 60
+
+
+def test_offline_backfill_and_lamp_keys_are_idempotent(client: TestClient):
+    headers = setup_headers(client)
+    backfill = {"client_uuid": "past-offline-1", "note": "那段过去"}
+    first_record = client.post("/api/v1/records/backfill", headers=headers, json=backfill).json()
+    second_record = client.post("/api/v1/records/backfill", headers=headers, json=backfill).json()
+    assert first_record["id"] == second_record["id"]
+
+    lamp = {"client_uuid": "lamp-offline-1", "message": "留给以后"}
+    first_lamp = client.post("/api/v1/lamps", headers=headers, json=lamp).json()
+    second_lamp = client.post("/api/v1/lamps", headers=headers, json=lamp).json()
+    assert first_lamp["id"] == second_lamp["id"]
+
+
 def test_echo_is_opt_in_neutral_and_delivered_once_per_old_anchor(client: TestClient):
     headers = setup_headers(client)
     old = iso(utc_now() - timedelta(days=15))
@@ -182,6 +218,13 @@ def test_future_backfill_is_rejected_and_weave_honors_window(client: TestClient)
     expanded = client.get("/api/v1/weave?days=365", headers=headers).json()
     assert recent["days"] == []
     assert len(expanded["days"]) == 1
+
+
+def test_weave_atmosphere_uses_recent_energy_without_darkening_for_absence(client: TestClient):
+    headers = setup_headers(client)
+    client.post("/api/v1/checkins", headers=headers, json={"energy": "low"})
+    client.post("/api/v1/checkins", headers=headers, json={"energy": "enough"})
+    assert client.get("/api/v1/weave", headers=headers).json()["atmosphere"] == {"low_ratio": 0.5}
 
 
 def test_ash_keeps_visual_energy_and_removes_text(client: TestClient):

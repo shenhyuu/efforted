@@ -7,7 +7,7 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
 DATABASE_PATH = Path(os.getenv("ZHIHEN_DB_PATH", BASE_DIR / "data" / "zhihen.db"))
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 def connect() -> sqlite3.Connection:
@@ -92,12 +92,12 @@ def initialize_database() -> None:
             CREATE TABLE IF NOT EXISTS lamps (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                client_uuid TEXT,
                 message TEXT NOT NULL,
                 energy_at_write TEXT CHECK (energy_at_write IN ('low','mid','enough') OR energy_at_write IS NULL),
                 created_at TEXT NOT NULL,
                 opened_at TEXT
             );
-
             CREATE TABLE IF NOT EXISTS user_settings (
                 user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
                 low_energy_mode INTEGER NOT NULL DEFAULT 0,
@@ -154,5 +154,14 @@ def initialize_database() -> None:
             connection.execute(
                 "ALTER TABLE user_settings ADD COLUMN privacy_mode INTEGER NOT NULL DEFAULT 0"
             )
+        lamp_columns = {
+            row["name"] for row in connection.execute("PRAGMA table_info(lamps)")
+        }
+        if "client_uuid" not in lamp_columns:
+            connection.execute("ALTER TABLE lamps ADD COLUMN client_uuid TEXT")
+        connection.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_lamps_client_uuid "
+            "ON lamps(user_id, client_uuid) WHERE client_uuid IS NOT NULL"
+        )
         connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         connection.commit()

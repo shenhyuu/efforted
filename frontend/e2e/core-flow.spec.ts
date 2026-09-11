@@ -41,6 +41,8 @@ test('S3: a timer can pause and resume without losing its place', async ({ page 
   if (await start.isVisible()) await start.click()
   await page.getByRole('button', { name: '我先歇一会儿' }).click()
   await expect(page.getByText(/你在这里停下了/)).toBeVisible()
+  await page.getByText('你停下的地方').click()
+  await expect(page.getByText(/那时走了/)).toBeVisible()
   await page.getByRole('button', { name: '我回来了' }).click()
   await expect(page.getByText('你回来了。')).toBeVisible()
 })

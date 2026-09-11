@@ -155,6 +155,14 @@ def timer_payload(row: sqlite3.Row) -> dict[str, object]:
     }
 
 
+def lamp_payload(row: sqlite3.Row) -> dict[str, object]:
+    return {
+        "id": row["id"], "message": row["message"],
+        "energy_at_write": row["energy_at_write"], "created_at": row["created_at"],
+        "opened_at": row["opened_at"],
+    }
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     initialize_database()
@@ -326,7 +334,7 @@ async def create_backfill(payload: BackfillCreate, user_id: AuthUser) -> dict[st
         record, _ = insert_record(
             connection, user_id, kind="backfill", occurred_at=occurred_at, time_scope=scope,
             day_slot=payload.day_slot, energy=payload.energy, content=payload.note,
-            effort_unit=payload.effort_unit,
+            effort_unit=payload.effort_unit, client_uuid=payload.client_uuid,
         )
         connection.commit()
         return record
@@ -353,6 +361,19 @@ async def list_records(
         ).fetchall()
     next_cursor = offset + len(rows) if len(rows) == limit else None
     return {"items": [row_record(row) for row in rows], "next_cursor": next_cursor}
+
+
+@app.get("/api/v1/effort-units")
+async def list_effort_units(user_id: AuthUser) -> dict[str, list[str]]:
+    """Return remembered wording without counts or frequency ranking."""
+    with closing(connect()) as connection:
+        rows = connection.execute(
+            """SELECT effort_unit,MAX(id) latest_id FROM records
+               WHERE user_id=? AND effort_unit IS NOT NULL AND trim(effort_unit)!=''
+               GROUP BY effort_unit ORDER BY latest_id DESC LIMIT 12""",
+            (user_id,),
+        ).fetchall()
+    return {"items": [row["effort_unit"] for row in rows]}
 
 
 @app.patch("/api/v1/records/{record_id}")
@@ -411,6 +432,10 @@ async def weave(
             """SELECT COALESCE(occurred_at,created_at) activity_at FROM records
                WHERE user_id=? ORDER BY activity_at DESC LIMIT 1""", (user_id,)
         ).fetchone()
+        recent_energy = connection.execute(
+            """SELECT energy FROM records WHERE user_id=? AND energy IS NOT NULL
+               ORDER BY id DESC LIMIT 12""", (user_id,)
+        ).fetchall()
     grouped: dict[str, list[dict[str, object]]] = {}
     for row in rows:
         grouped.setdefault(row["day"], []).append({"energy": row["energy"], "count": row["count"]})
@@ -418,10 +443,15 @@ async def weave(
     if last:
         elapsed_days = max(0, (utc_now() - parse_iso(last["activity_at"])).days)
         temperature = max(0.15, 1 - elapsed_days / 90)
+    low_ratio = (
+        sum(row["energy"] == "low" for row in recent_energy) / len(recent_energy)
+        if recent_energy else 0
+    )
     return {
         "days": [{"day": day, "threads": threads} for day, threads in grouped.items()],
         "past": {"label": "过去", "threads": [{"energy": r["energy"], "count": r["count"]} for r in past]},
         "ember": {"temperature": round(temperature, 3)},
+        "atmosphere": {"low_ratio": round(low_ratio, 3)},
     }
 
 
@@ -487,6 +517,28 @@ async def get_timer(timer_id: int, user_id: AuthUser) -> dict[str, object]:
     return timer_payload(row)
 
 
+@app.get("/api/v1/timers/{timer_id}/segments")
+async def timer_segments(timer_id: int, user_id: AuthUser) -> dict[str, object]:
+    with closing(connect()) as connection:
+        timer = connection.execute(
+            "SELECT id FROM timers WHERE id=? AND user_id=?", (timer_id, user_id)
+        ).fetchone()
+        if not timer:
+            raise friendly(404, "NOT_FOUND", "没找到这段计时，它可能已经收好了。")
+        rows = connection.execute(
+            """SELECT started_at,ended_at FROM timer_segments
+               WHERE timer_id=? ORDER BY id""", (timer_id,)
+        ).fetchall()
+    elapsed = 0
+    stops: list[dict[str, object]] = []
+    for row in rows:
+        if not row["ended_at"]:
+            continue
+        elapsed += max(0, int((parse_iso(row["ended_at"]) - parse_iso(row["started_at"])).total_seconds()))
+        stops.append({"stopped_at": row["ended_at"], "elapsed_seconds": elapsed})
+    return {"stops": stops}
+
+
 @app.post("/api/v1/timers/{timer_id}/pause")
 async def pause_timer(timer_id: int, user_id: AuthUser) -> dict[str, object]:
     now = utc_now()
@@ -544,12 +596,20 @@ async def close_timer(timer_id: int, user_id: AuthUser) -> dict[str, object]:
 async def create_lamp(payload: LampCreate, user_id: AuthUser) -> dict[str, object]:
     now = iso()
     with closing(connect()) as connection:
+        if payload.client_uuid:
+            existing = connection.execute(
+                "SELECT * FROM lamps WHERE user_id=? AND client_uuid=?",
+                (user_id, payload.client_uuid),
+            ).fetchone()
+            if existing:
+                return lamp_payload(existing)
         cursor = connection.execute(
-            "INSERT INTO lamps(user_id,message,energy_at_write,created_at) VALUES(?,?,?,?)",
-            (user_id, payload.message, payload.energy_at_write, now),
+            "INSERT INTO lamps(user_id,client_uuid,message,energy_at_write,created_at) VALUES(?,?,?,?,?)",
+            (user_id, payload.client_uuid, payload.message, payload.energy_at_write, now),
         )
         connection.commit()
-        return {"id": cursor.lastrowid, "message": payload.message, "energy_at_write": payload.energy_at_write, "created_at": now, "opened_at": None}
+        row = connection.execute("SELECT * FROM lamps WHERE id=?", (cursor.lastrowid,)).fetchone()
+        return lamp_payload(row)
 
 
 @app.get("/api/v1/lamps")

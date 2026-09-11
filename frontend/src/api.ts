@@ -30,6 +30,7 @@ export interface Lamp {
   energy_at_write: Energy | null
   created_at: string
   opened_at: string | null
+  pending?: boolean
 }
 export interface Settings {
   low_energy_mode: boolean
@@ -47,6 +48,7 @@ export interface WeaveData {
   days: Array<{ day: string; threads: WeaveThread[] }>
   past: { label: string; threads: WeaveThread[] }
   ember: { temperature: number }
+  atmosphere: { low_ratio: number }
 }
 export interface ComebackData {
   is_comeback: boolean
@@ -62,12 +64,17 @@ export interface ComebackData {
 const TOKEN_KEY = 'zhihen_token'
 const QUEUE_DB = 'zhihen-offline'
 const QUEUE_STORE = 'checkins'
-interface QueuedCheckin {
+interface QueuedAction {
+  kind?: 'checkin' | 'backfill' | 'lamp'
   client_uuid: string
   client_created_at: string
   energy?: Energy
   note?: string
   effort_unit?: string
+  day?: string
+  day_slot?: DaySlot
+  message?: string
+  energy_at_write?: Energy
 }
 
 class ApiResponseError extends Error {}
@@ -116,18 +123,18 @@ function queueDatabase(): Promise<IDBDatabase> {
   })
 }
 
-async function queuedItems(): Promise<QueuedCheckin[]> {
+async function queuedItems(): Promise<QueuedAction[]> {
   const database = await queueDatabase()
   return new Promise((resolve, reject) => {
     const transaction = database.transaction(QUEUE_STORE, 'readonly')
     const request = transaction.objectStore(QUEUE_STORE).getAll()
-    request.onsuccess = () => resolve(request.result as QueuedCheckin[])
+    request.onsuccess = () => resolve(request.result as QueuedAction[])
     request.onerror = () => reject(request.error)
     transaction.oncomplete = () => database.close()
   })
 }
 
-async function enqueue(item: QueuedCheckin): Promise<void> {
+async function enqueue(item: QueuedAction): Promise<void> {
   const database = await queueDatabase()
   await new Promise<void>((resolve, reject) => {
     const transaction = database.transaction(QUEUE_STORE, 'readwrite')
@@ -150,23 +157,50 @@ async function removeQueued(ids: string[]): Promise<void> {
   database.close()
 }
 
-export async function flushOfflineCheckins() {
+export async function flushOfflineActions() {
   const items = await queuedItems()
   if (!items.length || !token.get()) return 0
-  const result = await request<{ accepted: number; duplicates_ignored: number; invalid_ignored: number }>(
-    '/checkins/batch', { method: 'POST', body: JSON.stringify({ items }) },
-  )
-  await removeQueued(items.map((item) => item.client_uuid))
-  return result.accepted + result.duplicates_ignored
+  let synchronized = 0
+  const checkins = items.filter((item) => !item.kind || item.kind === 'checkin')
+  if (checkins.length) {
+    const result = await request<{ accepted: number; duplicates_ignored: number; invalid_ignored: number }>(
+      '/checkins/batch', { method: 'POST', body: JSON.stringify({ items: checkins }) },
+    )
+    await removeQueued(checkins.map((item) => item.client_uuid))
+    synchronized += result.accepted + result.duplicates_ignored
+  }
+  for (const item of items.filter((candidate) => candidate.kind === 'backfill' || candidate.kind === 'lamp')) {
+    const path = item.kind === 'backfill' ? '/records/backfill' : '/lamps'
+    const body = item.kind === 'backfill'
+      ? { client_uuid: item.client_uuid, day: item.day, day_slot: item.day_slot, energy: item.energy, note: item.note, effort_unit: item.effort_unit }
+      : { client_uuid: item.client_uuid, message: item.message, energy_at_write: item.energy_at_write }
+    await request(path, { method: 'POST', body: JSON.stringify(body) })
+    await removeQueued([item.client_uuid])
+    synchronized++
+  }
+  return synchronized
 }
 
+export const flushOfflineCheckins = flushOfflineActions
+
 export async function offlineQueuedRecords(): Promise<RecordItem[]> {
-  return (await queuedItems()).map((item) => ({
-    id: -Math.abs(hashId(item.client_uuid)), occurred_at: item.client_created_at,
-    time_scope: 'exact', time_label: null, day_slot: null, energy: item.energy || null,
+  return (await queuedItems()).filter((item) => item.kind !== 'lamp').map((item) => ({
+    id: -Math.abs(hashId(item.client_uuid)),
+    occurred_at: item.kind === 'backfill' ? (item.day ? `${item.day}T12:00:00Z` : null) : item.client_created_at,
+    time_scope: item.kind === 'backfill' && !item.day ? 'past' : 'exact',
+    time_label: item.kind === 'backfill' && !item.day ? '过去' : null,
+    day_slot: item.day_slot || null, energy: item.energy || null,
     content: item.note || null, duration_seconds: null, ash: false,
     effort_unit: item.effort_unit || null,
     created_at: item.client_created_at, pending: true,
+  }))
+}
+
+async function offlineQueuedLamps(): Promise<Lamp[]> {
+  return (await queuedItems()).filter((item) => item.kind === 'lamp').map((item) => ({
+    id: -Math.abs(hashId(item.client_uuid)), message: item.message || '',
+    energy_at_write: item.energy_at_write || null, created_at: item.client_created_at,
+    opened_at: null, pending: true,
   }))
 }
 
@@ -204,23 +238,51 @@ export const api = {
     } catch (error) {
       if (error instanceof ApiResponseError) throw error
       const createdAt = new Date().toISOString()
-      await enqueue({ ...input, client_created_at: createdAt })
+      await enqueue({ ...input, kind: 'checkin', client_created_at: createdAt })
       return (await offlineQueuedRecords()).find((item) => item.occurred_at === createdAt) as RecordItem
     }
   },
-  backfill: (input: { day?: string; day_slot?: DaySlot; energy?: Energy; note?: string; effort_unit?: string }) =>
-    request<RecordItem>('/records/backfill', { method: 'POST', body: JSON.stringify(input) }),
+  async backfill(input: { day?: string; day_slot?: DaySlot; energy?: Energy; note?: string; effort_unit?: string }) {
+    const client_uuid = crypto.randomUUID(), client_created_at = new Date().toISOString()
+    try {
+      return await request<RecordItem>('/records/backfill', { method: 'POST', body: JSON.stringify({ ...input, client_uuid }) })
+    } catch (error) {
+      if (error instanceof ApiResponseError) throw error
+      await enqueue({ ...input, kind: 'backfill', client_uuid, client_created_at })
+      return (await offlineQueuedRecords()).find((item) => item.id === -Math.abs(hashId(client_uuid))) as RecordItem
+    }
+  },
   updateRecord: (id: number, input: { day?: string | null; day_slot?: DaySlot | null; energy?: Energy | null; content?: string | null; effort_unit?: string | null }) =>
     request<RecordItem>(`/records/${id}`, { method: 'PATCH', body: JSON.stringify(input) }),
   deleteRecord: (id: number) => request<void>(`/records/${id}`, { method: 'DELETE' }),
   comeback: () => request<ComebackData>('/comeback'),
   activeTimer: () => request<TimerState | null>('/timers/active'),
+  timerSegments: (id: number) => request<{ stops: Array<{ stopped_at: string; elapsed_seconds: number }> }>(`/timers/${id}/segments`),
   startTimer: () => request<TimerState>('/timers', { method: 'POST' }),
   pauseTimer: (id: number) => request<TimerState>(`/timers/${id}/pause`, { method: 'POST' }),
   resumeTimer: (id: number) => request<TimerState>(`/timers/${id}/resume`, { method: 'POST' }),
   closeTimer: (id: number) => request<{ total_seconds: number; record_id: number }>(`/timers/${id}/close`, { method: 'POST' }),
-  lamps: () => request<{ lamps: Lamp[]; context_note: string }>('/lamps'),
-  createLamp: (message: string, energy_at_write?: Energy) => request<Lamp>('/lamps', { method: 'POST', body: JSON.stringify({ message, energy_at_write }) }),
+  async lamps() {
+    const pending = await offlineQueuedLamps().catch(() => [])
+    try {
+      await flushOfflineActions()
+      return await request<{ lamps: Lamp[]; context_note: string }>('/lamps')
+    } catch (error) {
+      if (pending.length) return { lamps: pending, context_note: '等待联结后，这些灯会留在这里。' }
+      throw error
+    }
+  },
+  async createLamp(message: string, energy_at_write?: Energy) {
+    const client_uuid = crypto.randomUUID(), client_created_at = new Date().toISOString()
+    try {
+      return await request<Lamp>('/lamps', { method: 'POST', body: JSON.stringify({ message, energy_at_write, client_uuid }) })
+    } catch (error) {
+      if (error instanceof ApiResponseError) throw error
+      await enqueue({ kind: 'lamp', client_uuid, client_created_at, message, energy_at_write })
+      return (await offlineQueuedLamps()).find((item) => item.id === -Math.abs(hashId(client_uuid))) as Lamp
+    }
+  },
+  effortUnits: () => request<{ items: string[] }>('/effort-units'),
   openLamp: (id: number) => request<Lamp>(`/lamps/${id}/open`, { method: 'POST' }),
   deleteLamp: (id: number) => request<void>(`/lamps/${id}`, { method: 'DELETE' }),
   settings: () => request<Settings>('/settings'),

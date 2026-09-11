@@ -44,4 +44,20 @@ describe('offline check-in queue', () => {
     expect(await flushOfflineCheckins()).toBe(0)
     expect(await offlineQueuedRecords()).toHaveLength(0)
   })
+
+  it('keeps a backfill during a network failure', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('offline')))
+    const record = await api.backfill({ note: '那段过去' })
+    expect(record.pending).toBe(true)
+    expect(record.time_scope).toBe('past')
+    expect((await offlineQueuedRecords())[0]?.content).toBe('那段过去')
+  })
+
+  it('keeps a lamp during a network failure', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('offline')))
+    const lamp = await api.createLamp('留给以后', 'low')
+    expect(lamp.pending).toBe(true)
+    const shelf = await api.lamps()
+    expect(shelf.lamps[0]?.message).toBe('留给以后')
+  })
 })

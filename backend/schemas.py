@@ -31,6 +31,7 @@ class BatchCheckinCreate(BaseModel):
 
 class BackfillCreate(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
+    client_uuid: str | None = Field(default=None, min_length=1, max_length=80)
     day: date | None = None
     day_slot: DaySlot | None = None
     energy: Energy | None = None
@@ -62,6 +63,7 @@ class RecordUpdate(BaseModel):
 
 class LampCreate(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
+    client_uuid: str | None = Field(default=None, min_length=1, max_length=80)
     message: str = Field(min_length=1, max_length=1000)
     energy_at_write: Energy | None = None
 

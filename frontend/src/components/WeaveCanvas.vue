@@ -50,7 +50,20 @@ function draw(progress = 1) {
   const threads = visibleThreads.value
   const visible = Math.ceil(threads.length * progress)
   const temperature = Math.max(.15, Math.min(1, weave.ember.temperature))
+  const lowRatio = Math.max(0, Math.min(1, weave.atmosphere?.low_ratio || 0))
+  const styles = getComputedStyle(document.documentElement)
+  const ember = styles.getPropertyValue('--ember-glow').trim() || '#c79567'
+  const fog = styles.getPropertyValue('--fog').trim() || '#f3f1ec'
   const margin = 22, span = Math.max(1, height - margin * 2)
+
+  const warmth = context.createRadialGradient(width * .72, height * .52, 0, width * .72, height * .52, width * .62)
+  warmth.addColorStop(0, ember)
+  warmth.addColorStop(1, 'transparent')
+  context.fillStyle = warmth
+  context.globalAlpha = .035 + temperature * .1
+  context.fillRect(0, 0, width, height)
+
+  context.filter = lowRatio ? `blur(${(.15 + lowRatio * .65).toFixed(2)}px)` : 'none'
   threads.slice(0, visible).forEach((thread, index) => {
     const y = margin + (index / Math.max(threads.length - 1, 1)) * span
     const seed = ((index + 11) * 2654435761) >>> 0
@@ -59,12 +72,28 @@ function draw(progress = 1) {
     context.beginPath()
     context.moveTo(8, y)
     context.bezierCurveTo(width * .28, y + bend, width * .67, y - bend + groupShift, width - 8, y + groupShift)
-    context.strokeStyle = colors[thread.energy || 'plain']
+    const threadColor = colors[thread.energy || 'plain']
+    const threadWarmth = context.createLinearGradient(8, 0, width - 8, 0)
+    threadWarmth.addColorStop(0, threadColor)
+    threadWarmth.addColorStop(.78, threadColor)
+    threadWarmth.addColorStop(1, ember)
+    context.strokeStyle = threadWarmth
     context.globalAlpha = (.2 + temperature * .56) * (.78 + (seed % 20) / 100)
     context.lineWidth = threads.length > 900 ? .65 : threads.length > 300 ? .9 : 1.25
     context.stroke()
   })
+  context.filter = 'none'
   context.globalAlpha = 1
+  if (lowRatio > 0) {
+    const veil = context.createLinearGradient(0, 0, width, height)
+    veil.addColorStop(0, 'transparent')
+    veil.addColorStop(.48, fog)
+    veil.addColorStop(1, 'transparent')
+    context.fillStyle = veil
+    context.globalAlpha = .08 + lowRatio * .22
+    context.fillRect(0, 0, width, height)
+    context.globalAlpha = 1
+  }
 }
 
 function changeZoom(next: number) {

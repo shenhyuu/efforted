@@ -135,6 +135,8 @@ h1 { margin: 12px 0 13px; font-size: clamp(34px, 4vw, 47px); letter-spacing: 0.0
 .effort-unit-picker details { margin-top: 10px; color: var(--ink-faint); font-size: 11px; }
 .effort-unit-picker summary { width: fit-content; cursor: pointer; }
 .effort-unit-picker input { width: 100%; margin-top: 9px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: rgba(255,255,255,.4); color: var(--ink); }
+.remembered-units { display: grid; gap: 8px; margin-top: 12px; }
+.remembered-units > small { color: var(--ink-faint); }
 .presence-card > .effort-unit-picker { margin-top: 20px; }.presence-card > .effort-unit-picker .choice-row { justify-content: center; }
 .form-message { min-height: 22px; margin: 18px 0 0; color: var(--ink-soft); font-size: 12px; text-align: center; }
 .comeback-message { margin-top: 10px !important; color: var(--umber) !important; }
@@ -151,6 +153,9 @@ h1 { margin: 12px 0 13px; font-size: clamp(34px, 4vw, 47px); letter-spacing: 0.0
 .timer-actions { display: flex; justify-content: center; gap: 10px; }
 .timer-actions .secondary-action { min-height: 46px; }
 .timer-number-toggle { display: block; margin: -28px auto 28px; }
+.timer-history { max-width: 440px; margin: 24px auto 0; padding: 14px 18px; border: 1px solid var(--line); border-radius: 14px; text-align: left; color: var(--ink-soft); }
+.timer-history summary { cursor: pointer; font-size: 12px; }
+.timer-history ol { display: grid; gap: 8px; margin: 14px 0 0; padding-left: 22px; font-size: 12px; }
 @keyframes breathe { 50% { transform: scale(1.045); box-shadow: 0 0 70px rgba(170,138,112,.15); } }
 
 .lamp-card { text-align: center; }
